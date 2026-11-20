@@ -147,9 +147,14 @@ def test_oversized_token_is_hard_split_without_losing_characters() -> None:
 
 
 def test_defaults_and_overrides_can_be_set_independently(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert (config.CHUNK_SIZE, config.CHUNK_OVERLAP) == (900, 120)
+    assert (config.CHUNK_SIZE, config.CHUNK_OVERLAP) == (800, 100)
     page = PdfPage(1, "alpha beta gamma delta epsilon", False)
     assert chunk_pdf_pages([page], "policy.pdf")[0].text == page.text
+
+    long_page = PdfPage(1, " ".join(f"item-{index:03d}" for index in range(100)), False)
+    configured_chunks = chunk_pdf_pages([long_page], "policy.pdf")
+    assert len(configured_chunks) > 1
+    assert configured_chunks == chunk_pdf_pages([long_page], "policy.pdf", 800, 100)
 
     monkeypatch.setattr(config, "CHUNK_SIZE", 17)
     monkeypatch.setattr(config, "CHUNK_OVERLAP", 8)

@@ -13,7 +13,8 @@ local document processing and cloud-based answer generation through the Gemini A
 The intended system will use Retrieval-Augmented Generation (RAG) to answer
 questions using company documents and cite its sources.
 
-**Implemented:** project setup, PDF text extraction with selective OCR, and text chunking.
+**Implemented:** project setup, PDF text extraction with selective OCR, text chunking,
+and local chunk embeddings.
 **Planned:** document uploads, retrieval, grounded answers, and the interface.
 There is no functional chatbot or runnable Streamlit application yet.
 
@@ -179,7 +180,7 @@ dates, prices, and business IDs. `chunk_pdf_pages()` divides the cleaned pages i
 smaller passages for future retrieval and citations. It skips empty pages and
 keeps short, nonempty pages even when OCR is still flagged.
 
-The defaults are `CHUNK_SIZE = 900` and `CHUNK_OVERLAP = 120`, both in characters.
+The defaults are `CHUNK_SIZE = 800` and `CHUNK_OVERLAP = 100`, both in characters.
 Paragraph and sentence breaks help keep related text together. If neither fits,
 chunks break at whole words. A token longer than the limit, such as a long URL,
 is the exception and is hard-split into separate pieces. Overlap carries a suffix
@@ -190,8 +191,44 @@ the original 1-based page number, and its 1-based index on that page.
 Stable chunk IDs use a SHA-256 fingerprint of the filename, ordered cleaned pages,
 and both chunk settings, followed by page and chunk indexes. This supports future
 deduplication. Uploaded-file identity and replacement belong to the storage stage.
-The character limits are heuristics. The embedding stage must validate actual
-token counts against the all-MiniLM-L6-v2 budget of about 256 tokens.
+The character limits were calibrated on the four sample PDFs. They cannot guarantee
+a token count for new documents, so the embedding stage validates actual token
+counts against the model's sequence limit.
+
+### Local chunk embeddings
+
+An embedding is a numeric representation of a passage. `embed_chunks()` converts
+document chunks to 384-dimensional vectors so future retrieval can compare passages
+by meaning. DistribuAI uses the compact `sentence-transformers/all-MiniLM-L6-v2`
+model for local inference. Embeddings are normalized so similarity comparisons can
+use vector direction independently of magnitude. Each record keeps the original
+chunk ID, filename, and page number for future citations.
+
+The first real run may download model files to the normal user cache. The model
+loads on demand and is reused in the process. It can run offline once cached.
+Its input limit is about 256 tokens, including special tokens. The same number of
+characters can tokenize to different lengths. The module counts tokens with the
+model's tokenizer before it encodes any batch and rejects oversized chunks. Use a
+smaller chunk size when rechunking a document that exceeds the limit.
+
+Embedding unit tests use a mock model. For a manual check with the cached model,
+run this from the project root in PowerShell with the virtual environment active:
+
+```powershell
+$env:HF_HUB_OFFLINE = '1'
+@'
+from math import isfinite
+from distribuai.rag.chunking import DocumentChunk
+from distribuai.rag.embeddings import embed_chunks
+
+record, = embed_chunks([DocumentChunk('smoke-1', 'sample.pdf', 1, 1, 'Orders ship on weekdays.')])
+assert len(record.vector) == 384 and all(map(isfinite, record.vector))
+print('PASS: 384 finite embedding values')
+'@ | python -B -
+```
+
+Embedding vectors are returned in memory. ChromaDB storage, semantic retrieval,
+and Gemini answer generation are planned.
 
 `.env.example` contains blank entries for `GEMINI_API_KEY` and `TESSERACT_CMD`.
 Copy it to an ignored local file and edit that file privately:
@@ -215,7 +252,7 @@ With the Python 3.12 virtual environment active:
 python -m pytest -q
 ```
 
-The suite verifies the scaffold, native PDF extraction, and selective OCR. The
+The suite verifies the scaffold, PDF extraction, OCR, chunking, and embeddings. The
 regular OCR tests simulate the executable. One optional smoke test uses a
 synthetic PDF and real Tesseract, and skips if the executable is unavailable.
 
@@ -245,8 +282,8 @@ These application safeguards are planned, not implemented.
 
 ## Known limitations
 
-- PDF extraction, OCR, and chunking are available as Python functions. Embedding,
-  retrieval, database operations, LLM calls, citations, and the UI are planned.
+- PDF extraction, OCR, chunking, and embedding are available as Python functions.
+  Retrieval, database operations, LLM calls, citations, and the UI are planned.
 - No models or system tools were installed or downloaded.
 - Gemini requires an API key and internet access, is subject to rate limits, and
   sends retrieved document text to Google. API requests are not implemented yet.

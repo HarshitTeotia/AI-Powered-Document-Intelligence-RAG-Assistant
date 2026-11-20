@@ -1,7 +1,7 @@
 """Exercise native extraction with synthetic PDFs and controlled failures."""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import pdfplumber
 import pytest
@@ -9,6 +9,7 @@ from pdfplumber.page import Page
 
 from distribuai.ingestion.pdf_extractor import (
     MIN_TEXT_CHARS,
+    X_TOLERANCE,
     PdfExtractionError,
     PdfPage,
     extract_pdf_pages,
@@ -95,6 +96,18 @@ def test_preserves_all_pages_and_flags_sparse_text(tmp_path: Path) -> None:
         PdfPage(3, "3", True),
         PdfPage(4, "", True),
     ]
+
+
+def test_passes_x_tolerance_to_page_extraction(tmp_path: Path) -> None:
+    """Use DistribuAI's horizontal gap threshold for native PDF text."""
+    source = _write_pdf(tmp_path / "tolerance.pdf", "Sample policy text")
+
+    with patch.object(
+        Page, "extract_text", autospec=True, return_value="Sample policy text"
+    ) as extract:
+        extract_pdf_pages(source)
+
+    extract.assert_called_once_with(ANY, x_tolerance=X_TOLERANCE)
 
 
 def test_flags_only_text_strictly_below_threshold(tmp_path: Path) -> None:

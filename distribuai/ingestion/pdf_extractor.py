@@ -8,6 +8,7 @@ import pdfplumber
 
 # A scanned page can still contain a small text layer such as a page number.
 MIN_TEXT_CHARS = 20
+X_TOLERANCE = 1.5
 
 
 @dataclass(frozen=True)
@@ -53,7 +54,7 @@ def extract_pdf_pages(pdf_path: Path) -> list[PdfPage]:
             for page in pdf.pages:
                 page_number = page.page_number
                 try:
-                    text = (page.extract_text() or "").strip()
+                    text = (page.extract_text(x_tolerance=X_TOLERANCE) or "").strip()
                 except Exception as exc:
                     raise PdfExtractionError(
                         f"Could not extract text from PDF page {page_number}."

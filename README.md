@@ -14,7 +14,7 @@ The intended system will use Retrieval-Augmented Generation (RAG) to answer
 questions using company documents and cite its sources.
 
 **Implemented:** project setup, PDF text extraction with selective OCR, text chunking,
-and local chunk embeddings.
+local chunk embeddings, and persistent vector storage.
 **Planned:** document uploads, retrieval, grounded answers, and the interface.
 There is no functional chatbot or runnable Streamlit application yet.
 
@@ -27,7 +27,6 @@ There is no functional chatbot or runnable Streamlit application yet.
 
 - Upload company PDFs through the application.
 - Chunk document text and embed it locally.
-- Persist embeddings in a local ChromaDB store.
 - Retrieve relevant passages and generate answers with source citations.
 - Provide a Streamlit interface and evaluate answer quality.
 
@@ -227,8 +226,30 @@ print('PASS: 384 finite embedding values')
 '@ | python -B -
 ```
 
-Embedding vectors are returned in memory. ChromaDB storage, semantic retrieval,
-and Gemini answer generation are planned.
+Embedding vectors are returned in memory and can be passed to the local store.
+
+### Local vector storage
+
+ChromaDB stores vectors, text, and citations together on disk so they survive a
+restart. `open_vector_collection()` creates or reopens `distribuai_documents` in
+`data/vector_store/` by default. Pass a `Path` to use a separate directory for
+testing. The collection uses cosine distance for comparisons between the
+normalized embeddings. It validates the configured all-MiniLM-L6-v2 model and
+384 dimensions on open and accepts the existing vectors directly, with ChromaDB's
+embedding function disabled.
+
+`store_embedded_chunks()` upserts by deterministic chunk ID. Reprocessing identical
+content with the same filename and chunk settings updates existing IDs rather than
+increasing the record count. Records store the original text with the source
+filename, 1-based page number, 1-based chunk index, and token count. Modified
+content or chunk settings can produce new IDs. Previous versions remain in the
+collection until document management is added. Batches are separate writes, so
+earlier batches may remain stored if a later batch fails.
+
+The persistent directory contains document text, embeddings, and citation metadata.
+Protect it using the same local access controls as the source PDFs. Its contents
+are Git-ignored to keep document data and local database files out of the repository.
+Semantic retrieval and Gemini answer generation are planned.
 
 `.env.example` contains blank entries for `GEMINI_API_KEY` and `TESSERACT_CMD`.
 Copy it to an ignored local file and edit that file privately:
@@ -252,7 +273,7 @@ With the Python 3.12 virtual environment active:
 python -m pytest -q
 ```
 
-The suite verifies the scaffold, PDF extraction, OCR, chunking, and embeddings. The
+The suite verifies the scaffold, PDF extraction, OCR, chunking, embeddings, and local storage. The
 regular OCR tests simulate the executable. One optional smoke test uses a
 synthetic PDF and real Tesseract, and skips if the executable is unavailable.
 
@@ -282,8 +303,8 @@ These application safeguards are planned, not implemented.
 
 ## Known limitations
 
-- PDF extraction, OCR, chunking, and embedding are available as Python functions.
-  Retrieval, database operations, LLM calls, citations, and the UI are planned.
+- PDF extraction, OCR, chunking, embedding, and local storage are available as
+  Python functions. Retrieval, LLM calls, answer citations, and the UI are planned.
 - No models or system tools were installed or downloaded.
 - Gemini requires an API key and internet access, is subject to rate limits, and
   sends retrieved document text to Google. API requests are not implemented yet.

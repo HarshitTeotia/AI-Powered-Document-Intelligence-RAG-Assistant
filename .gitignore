@@ -1,0 +1,55 @@
+# Virtual environments
+.venv/
+.venv*/
+venv/
+venv*/
+env/
+ENV/
+
+# Python and test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor and operating system temporary files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Secrets and local environment configuration
+.env
+.env.*
+!.env.example
+*.env
+.streamlit/secrets.toml
+.aws/
+
+# Customer documents and local databases; retain placeholders
+/data/uploads/*
+!/data/uploads/.gitkeep
+/data/vector_store/*
+!/data/vector_store/.gitkeep
+
+# Logs and temporary output
+*.log
+logs/
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Repository-local model downloads and ML caches
+models/
+.models/
+.cache/
+.huggingface/
+huggingface/
+.torch/
+torch_cache/
+sentence_transformers/

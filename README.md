@@ -1,0 +1,248 @@
+# DistribuAI
+
+## Business problem
+
+Distribution support teams need to find reliable answers across company PDFs,
+including scanned documents. Manual searches can slow responses and make it
+difficult to identify the document supporting an answer.
+
+## Project overview
+
+DistribuAI is a planned document intelligence and customer-support assistant with
+local document processing and cloud-based answer generation through the Gemini API.
+The intended system will use Retrieval-Augmented Generation (RAG) to answer
+questions using company documents and cite its sources.
+
+**Implemented:** project directories, shared configuration, dependency pins, Git
+ignore rules, and one filesystem setup test. **Planned:** all application features.
+There is no functional chatbot or runnable Streamlit application yet.
+
+## Intended users
+
+- Customer-support agents at distribution businesses.
+- Internal staff who need to locate company document information.
+
+## Planned features
+
+- Upload and extract text from company PDFs.
+- Render scanned pages and run OCR when needed.
+- Chunk document text and embed it locally.
+- Persist embeddings in a local ChromaDB store.
+- Retrieve relevant passages and generate answers with source citations.
+- Provide a Streamlit interface and evaluate answer quality.
+
+## Locked technology stack
+
+Python 3.12 and the following ten direct Python dependencies are approved.
+Required transitive dependencies are installed by pip; no additional direct
+dependencies are included.
+
+| Dependency | Version | Planned use / release metadata |
+| --- | --- | --- |
+| Streamlit | 1.45.1 | [UI](https://pypi.org/project/streamlit/1.45.1/) |
+| pdfplumber | 0.11.6 | [PDF text extraction](https://pypi.org/project/pdfplumber/0.11.6/) |
+| pytesseract | 0.3.13 | [OCR wrapper](https://pypi.org/project/pytesseract/0.3.13/) |
+| pypdfium2 | 5.15.2 | [PDF page rendering](https://pypi.org/project/pypdfium2/5.15.2/) |
+| sentence-transformers | 4.1.0 | [Local embeddings](https://pypi.org/project/sentence-transformers/4.1.0/) |
+| ChromaDB | 1.0.9 | [Local vector storage](https://pypi.org/project/chromadb/1.0.9/) |
+| Pandas | 2.2.3 | [Evaluation and analysis](https://pypi.org/project/pandas/2.2.3/) |
+| Pytest | 8.3.5 | [Testing](https://pypi.org/project/pytest/8.3.5/) |
+| google-genai | 1.51.0 | [Gemini API SDK](https://pypi.org/project/google-genai/1.51.0/) |
+| python-dotenv | 1.2.1 | [Future .env loading](https://pypi.org/project/python-dotenv/1.2.1/) |
+
+These are explicit release pins, not a claim that they are the latest releases.
+Release existence for the two Gemini setup additions was verified against the
+linked PyPI release pages. Full dependency resolution is not verified.
+Direct pins do not lock the entire transitive dependency graph.
+
+The system tool planned for later phases is Tesseract OCR. Answer generation will
+use Google's Gemini API with the user's own API key.
+Git/GitHub is the intended version-control workflow; setup initializes only local
+Git, without a remote, commit, or push.
+
+## Planned architecture
+
+```text
+Company PDFs -> pdfplumber text extraction
+             -> scanned pages: pypdfium2 rendering -> Tesseract via pytesseract
+Extracted text -> chunks with source metadata
+              -> all-MiniLM-L6-v2 embeddings -> local ChromaDB
+Question -> local retrieval -> Google Gemini API -> answer with citations
+Streamlit -> upload and question/answer interface
+Pandas -> evaluation and analysis
+```
+
+This diagram describes future work. Configuration lives in `distribuai/config.py`:
+repository-relative upload and vector-store paths, the embedding model identifier,
+`GEMINI_API_KEY` read from `os.environ` without a fallback key, and `GEMINI_MODEL`
+(default `gemini-2.5-flash`, overridden by the environment variable of the same
+name). An unset key remains `None`; validation is deferred to future API integration.
+Importing configuration does not load `.env` files, create directories, load
+models, or contact services.
+
+## Project structure
+
+The current repository folder is the project root; no nested root is required.
+
+```text
+.
+|-- distribuai/
+|   |-- __init__.py
+|   |-- config.py
+|   |-- ingestion/
+|   |   `-- __init__.py
+|   |-- rag/
+|   |   `-- __init__.py
+|   `-- ui/
+|       `-- __init__.py
+|-- data/
+|   |-- uploads/
+|   |   `-- .gitkeep
+|   `-- vector_store/
+|       `-- .gitkeep
+|-- tests/
+|   `-- test_setup.py
+|-- requirements.txt
+|-- .env.example
+|-- .gitignore
+`-- README.md
+```
+
+## Prerequisites
+
+- Windows with PowerShell, Python 3.12 (64-bit), pip, and Git.
+- Network access to install Python packages during local setup.
+- Internet access and a valid personal Gemini API key for future answer generation.
+- Sufficient disk space for the ML packages and, in later phases, model files.
+
+Tesseract OCR requires a **separate system installation in a later phase**.
+It is not an entry in `requirements.txt` and is unnecessary for the setup test.
+The embedding model `sentence-transformers/all-MiniLM-L6-v2` will need a separate
+download later. Setup does not download models or install system tools. Gemini
+answer generation will require internet access; the application will not be fully
+offline. API quotas and rate limits depend on the selected model and project tier;
+check the [current Gemini rate limits](https://ai.google.dev/gemini-api/docs/rate-limits).
+
+## Local setup instructions
+
+Run these commands from this repository's root in Windows PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python --version
+python -m pip install -r requirements.txt
+```
+
+Confirm that `python --version` reports Python 3.12 before installing packages.
+If activation is blocked by a PowerShell execution policy, use the virtual
+environment interpreter directly without changing that policy:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+To check resolution for the active Python 3.12 environment without installing:
+
+```powershell
+python -m pip install --dry-run --ignore-installed -r requirements.txt
+```
+
+There is no application launch command in this phase because no UI exists yet.
+
+`.env.example` contains only a blank `GEMINI_API_KEY=` entry. Copy it to an ignored
+local file and edit that file privately when preparing for future API integration:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+The config module reads the process environment only. Merely creating `.env` does
+not load its contents; automatic loading with the approved `python-dotenv` package
+is planned for a later phase. Set `GEMINI_API_KEY` in the process environment before
+importing configuration when needed, and optionally set `GEMINI_MODEL` to a model
+available to your API project. Do not commit or print real keys. The setup test
+requires neither a key nor network access.
+
+## Running tests
+
+With the Python 3.12 virtual environment active:
+
+```powershell
+python -m pytest -q
+```
+
+Exactly one test verifies essential files and directories using portable paths.
+It uses no external service, downloaded model, or heavy ML import. A passing test
+confirms the scaffold exists; it does not validate future application behavior.
+
+## Evaluation approach
+
+Planned evaluation will use a reviewed set of document questions, expected answers,
+and source pages. Measure extraction/OCR quality, retrieval relevance, answer
+grounding, citation accuracy, refusal on insufficient evidence, and latency.
+Pandas will support analysis. No dataset, evaluation pipeline, or quality results
+exist yet.
+
+## Security and responsible-AI considerations
+
+Customer uploads, vector-store contents, secrets, virtual environments, and local
+model caches are excluded from Git; `.gitkeep` files preserve data directories.
+Git ignore rules are not access controls or encryption. Store sensitive documents
+only on appropriately protected machines and define retention/deletion practices
+before adding real data.
+
+Future work must treat retrieved document text as untrusted input, address prompt
+injection, support insufficient-evidence responses, and retain human review for
+customer-facing answers. In the planned Gemini integration, questions and retrieved
+document text will be sent to Google for answer generation. Review customer consent,
+data sensitivity, and Google's applicable data-use terms before enabling real-data
+use. Dependency telemetry and network behavior must also be reviewed.
+These application safeguards are planned, not implemented.
+
+## Known limitations
+
+- Setup only: no ingestion, OCR, chunking, embedding, retrieval, database operations,
+  LLM calls, citations, or user interface is implemented.
+- No models or system tools were installed or downloaded.
+- Gemini requires an API key and internet access, is subject to rate limits, and
+  sends retrieved document text to Google. API requests are not implemented yet.
+- Python 3.12 setup testing does not verify full dependency compatibility.
+- OCR accuracy, answer quality, hardware performance, and production suitability
+  have not been evaluated.
+
+### Setup validation
+
+Validation on November 20, 2026:
+
+- The two added pins were verified on their PyPI release pages. The eight original
+  pins are unchanged; the requirements file now has ten direct dependencies.
+- `python -m pytest -q` passed with **1 passed, 1 warning in 0.03s** using the available
+  Python 3.12.10 interpreter and pre-existing Pytest 9.1.1. The default `python`
+  command points to an inaccessible Windows alias, so the available interpreter
+  was invoked by its full path. The warning reports denied access when writing
+  the existing Pytest cache; the test itself passed. Testing with pinned Pytest
+  8.3.5 remains outstanding.
+- Full dependency resolution of the updated requirements is **unverified**. No
+  package installation was performed. The earlier setup resolution attempt timed
+  out at `files.pythonhosted.org`; it does not validate these updated requirements.
+- The original setup checked data placeholders and generated-data ignore rules.
+  `.env` remains ignored, with an explicit exception to track `.env.example`.
+  The correction checks passed for absent/present environment settings, the model
+  override, ten dependency pins, the blank example, and the single existing test.
+  Git was initialized by the sandbox account;
+  checks from the host account used a per-command `safe.directory` exception for
+  this repository. No global Git setting was changed. If Git reports dubious
+  ownership, review the repository ownership before trusting it on your account.
+
+## Development roadmap
+
+1. Project scaffold and setup validation (current phase).
+2. PDF extraction and selective OCR.
+3. Chunking, embeddings, and local vector persistence.
+4. Retrieval and Gemini API answers with source citations.
+5. Streamlit support workflow.
+6. Evaluation and security/responsible-AI review.
+
+Each later phase requires a separate task and review.

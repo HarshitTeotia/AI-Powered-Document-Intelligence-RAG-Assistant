@@ -14,8 +14,8 @@ The intended system will use Retrieval-Augmented Generation (RAG) to answer
 questions using company documents and cite its sources.
 
 **Implemented:** project setup, PDF text extraction with selective OCR, text chunking,
-local chunk embeddings, and persistent vector storage.
-**Planned:** document uploads, retrieval, grounded answers, and the interface.
+local chunk embeddings, persistent vector storage, and semantic retrieval.
+**Planned:** document uploads, grounded answers, and the interface.
 There is no functional chatbot or runnable Streamlit application yet.
 
 ## Intended users
@@ -27,7 +27,7 @@ There is no functional chatbot or runnable Streamlit application yet.
 
 - Upload company PDFs through the application.
 - Chunk document text and embed it locally.
-- Retrieve relevant passages and generate answers with source citations.
+- Generate answers with source citations from retrieved passages.
 - Provide a Streamlit interface and evaluate answer quality.
 
 ## Locked technology stack
@@ -249,7 +249,20 @@ earlier batches may remain stored if a later batch fails.
 The persistent directory contains document text, embeddings, and citation metadata.
 Protect it using the same local access controls as the source PDFs. Its contents
 are Git-ignored to keep document data and local database files out of the repository.
-Semantic retrieval and Gemini answer generation are planned.
+### Semantic retrieval
+
+`retrieve(collection, question, top_k=5, source_file=None)` returns up to five
+ranked passages by default. Set `source_file` to an exact filename to search only
+that document. The question and stored passages use the same all-MiniLM-L6-v2
+model and normalized vectors, so scores compare direction in the same vector
+space. Questions that exceed the model's token limit are rejected before encoding.
+
+Lower cosine distance means a closer match. Cosine similarity is `1 - distance`.
+Each result includes both scores, its rank, the original text, and citation
+coordinates such as the filename and page number. The closest passages can still
+be irrelevant. A future similarity threshold needs evaluation on labeled examples
+before it can support decisions about insufficient evidence. Retrieval returns
+passages for review. Gemini answer generation is planned.
 
 `.env.example` contains blank entries for `GEMINI_API_KEY` and `TESSERACT_CMD`.
 Copy it to an ignored local file and edit that file privately:
@@ -273,17 +286,16 @@ With the Python 3.12 virtual environment active:
 python -m pytest -q
 ```
 
-The suite verifies the scaffold, PDF extraction, OCR, chunking, embeddings, and local storage. The
-regular OCR tests simulate the executable. One optional smoke test uses a
+The suite verifies the scaffold, PDF extraction, OCR, chunking, embeddings, local
+storage, and retrieval. The regular OCR tests simulate the executable. One optional smoke test uses a
 synthetic PDF and real Tesseract, and skips if the executable is unavailable.
 
 ## Evaluation approach
 
-Planned evaluation will use a reviewed set of document questions, expected answers,
-and source pages. Measure extraction/OCR quality, retrieval relevance, answer
-grounding, citation accuracy, refusal on insufficient evidence, and latency.
-Pandas will support analysis. No dataset, evaluation pipeline, or quality results
-exist yet.
+The manual retrieval check uses the fictional sample PDFs and `eval/questions.csv`
+to measure source hits and evidence coverage. Page hits and reciprocal rank
+require labeled pages. Answer grounding, citation accuracy in generated answers,
+and refusal on insufficient evidence belong to later evaluation.
 
 ## Security and responsible-AI considerations
 
@@ -303,8 +315,8 @@ These application safeguards are planned, not implemented.
 
 ## Known limitations
 
-- PDF extraction, OCR, chunking, embedding, and local storage are available as
-  Python functions. Retrieval, LLM calls, answer citations, and the UI are planned.
+- PDF extraction, OCR, chunking, embedding, local storage, and retrieval are
+  available as Python functions. LLM calls, answer citations, and the UI are planned.
 - No models or system tools were installed or downloaded.
 - Gemini requires an API key and internet access, is subject to rate limits, and
   sends retrieved document text to Google. API requests are not implemented yet.

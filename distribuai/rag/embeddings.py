@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Set
+from collections.abc import Callable, Iterable, Mapping, Set
 from dataclasses import dataclass
 from functools import cache
 from math import isfinite
@@ -26,7 +26,7 @@ class EmbeddingError(Exception):
 
 
 class EmbeddingTokenLimitError(EmbeddingError):
-    """A document chunk exceeds the model's maximum sequence length."""
+    """A chunk or question exceeds the model's maximum sequence length."""
 
 
 @dataclass(frozen=True)
@@ -126,8 +126,40 @@ def _validate_chunks(chunks: list[DocumentChunk]) -> None:
         seen.add(chunk.chunk_id)
 
 
-def _count_tokens(model: SentenceTransformer, chunks: list[DocumentChunk]) -> list[int]:
-    """Count full token sequences, including the model's special tokens."""
+def embed_query(question: str) -> tuple[float, ...]:
+    """Encode one question with the same normalized model as document chunks."""
+    text = _clean_question(question)
+    model = load_embedding_model()
+    tokenizer, limit = _model_tokenizer(model)
+    count = _input_token_count(tokenizer, text, "the question")
+    if count > limit:
+        raise EmbeddingTokenLimitError(
+            f"Question has {count} tokens, exceeding the model limit of {limit}. Shorten the question."
+        )
+
+    try:
+        output = model.encode(
+            [text], normalize_embeddings=True, show_progress_bar=False, convert_to_numpy=True
+        )
+    except Exception as exc:
+        raise EmbeddingError("Embedding failed for the question.") from exc
+    return _validate_vectors(output, expected_count=1)[0]
+
+
+def _clean_question(question: str) -> str:
+    """Validate and trim a question without loading the model."""
+    if not isinstance(question, str):
+        raise TypeError("question must be a string.")
+    text = question.strip()
+    if not text:
+        raise ValueError("question must contain non-whitespace characters.")
+    return text
+
+
+def _model_tokenizer(
+    model: SentenceTransformer,
+) -> tuple[Callable[..., Mapping[str, object]], int]:
+    """Get the tokenizer and its effective model sequence limit."""
     try:
         tokenizer = model.tokenizer
         limit = model.max_seq_length
@@ -135,18 +167,29 @@ def _count_tokens(model: SentenceTransformer, chunks: list[DocumentChunk]) -> li
         raise EmbeddingError("Could not access the model tokenizer or sequence limit.") from exc
     if not callable(tokenizer) or type(limit) is not int or limit <= 0:
         raise EmbeddingError("The model tokenizer or maximum sequence length is unavailable.")
+    return tokenizer, limit
+
+
+def _input_token_count(
+    tokenizer: Callable[..., Mapping[str, object]], text: str, label: str
+) -> int:
+    """Count the complete token sequence, including special tokens."""
+    try:
+        ids = tokenizer(text, add_special_tokens=True, truncation=False, padding=False)["input_ids"]
+    except Exception as exc:
+        raise EmbeddingError(f"Tokenizer failed for {label}.") from exc
+    if not isinstance(ids, (list, tuple)) or not ids or any(type(token) is not int for token in ids):
+        raise EmbeddingError(f"Tokenizer returned invalid token IDs for {label}.")
+    return len(ids)
+
+
+def _count_tokens(model: SentenceTransformer, chunks: list[DocumentChunk]) -> list[int]:
+    """Count full token sequences, including the model's special tokens."""
+    tokenizer, limit = _model_tokenizer(model)
 
     counts: list[int] = []
     for chunk in chunks:
-        try:
-            ids = tokenizer(
-                chunk.text, add_special_tokens=True, truncation=False, padding=False
-            )["input_ids"]
-        except Exception as exc:
-            raise EmbeddingError(f"Tokenizer failed for chunk {chunk.chunk_id}.") from exc
-        if not isinstance(ids, (list, tuple)) or not ids or any(type(token) is not int for token in ids):
-            raise EmbeddingError(f"Tokenizer returned invalid token IDs for chunk {chunk.chunk_id}.")
-        count = len(ids)
+        count = _input_token_count(tokenizer, chunk.text, f"chunk {chunk.chunk_id}")
         if count > limit:
             raise EmbeddingTokenLimitError(
                 f"Chunk {chunk.chunk_id} has {count} tokens, exceeding the model limit of {limit}. "

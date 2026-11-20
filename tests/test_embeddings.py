@@ -213,3 +213,56 @@ def test_rejects_invalid_embedding_output(fake_model: Mock, output: object, mess
 
     with pytest.raises(embeddings.EmbeddingError, match=message):
         embeddings.embed_chunks([_chunk(1)])
+
+
+def test_embed_query_uses_the_document_model_and_full_tokens(fake_model: Mock) -> None:
+    fake_model.max_seq_length = 4
+    assert embeddings.embed_query("  Question 1  ") == (1.0,) + (0.0,) * 383
+
+    embeddings.load_embedding_model.assert_called_once_with()
+    fake_model.tokenizer.assert_called_once_with(
+        "Question 1", add_special_tokens=True, truncation=False, padding=False,
+    )
+    fake_model.encode.assert_called_once_with(
+        ["Question 1"], normalize_embeddings=True, show_progress_bar=False, convert_to_numpy=True,
+    )
+
+
+def test_embed_query_rejects_over_limit_before_encoding(fake_model: Mock) -> None:
+    fake_model.max_seq_length = 3
+    with pytest.raises(embeddings.EmbeddingTokenLimitError, match="4 tokens.*limit of 3"):
+        embeddings.embed_query("Question 1")
+    fake_model.encode.assert_not_called()
+
+
+@pytest.mark.parametrize("question", ["", " \t ", 42])
+def test_embed_query_validates_input_before_loading_model(fake_model: Mock, question: object) -> None:
+    with pytest.raises((TypeError, ValueError), match="question"):
+        embeddings.embed_query(question)
+    embeddings.load_embedding_model.assert_not_called()
+
+
+@pytest.mark.parametrize("vector", [[0.0] * 383, [float("nan")] * 384, [float("inf")] * 384])
+def test_embed_query_validates_vector_shape_and_finiteness(fake_model: Mock, vector: list[float]) -> None:
+    fake_model.encode.side_effect = None
+    fake_model.encode.return_value = [vector]
+    with pytest.raises(embeddings.EmbeddingError, match="dimension|finite"):
+        embeddings.embed_query("Question 1")
+
+
+def test_embed_query_reports_model_load_error(fake_model: Mock) -> None:
+    failure = embeddings.EmbeddingError("Could not load embedding model.")
+    embeddings.load_embedding_model.side_effect = failure
+    with pytest.raises(embeddings.EmbeddingError) as error:
+        embeddings.embed_query("Question 1")
+    assert error.value is failure
+
+
+@pytest.mark.parametrize(("operation", "message"), [("tokenizer", "Tokenizer failed"), ("encode", "Embedding failed")])
+def test_embed_query_chains_model_errors(fake_model: Mock, operation: str, message: str) -> None:
+    cause = RuntimeError("synthetic failure")
+    getattr(fake_model, operation).side_effect = cause
+    with pytest.raises(embeddings.EmbeddingError, match=message) as error:
+        embeddings.embed_query("Private question")
+    assert error.value.__cause__ is cause
+    assert "Private question" not in str(error.value)

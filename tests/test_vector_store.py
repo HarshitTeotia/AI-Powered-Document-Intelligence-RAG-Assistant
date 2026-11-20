@@ -12,6 +12,8 @@ from distribuai.rag.embeddings import EMBEDDING_DIMENSION, EmbeddedChunk
 from distribuai.rag.vector_store import (
     COLLECTION_NAME,
     VectorStoreError,
+    delete_document,
+    list_documents,
     open_vector_collection,
     store_embedded_chunks,
 )
@@ -261,3 +263,74 @@ def test_later_upsert_failure_reports_prior_progress(mock_collection: Mock) -> N
 
     assert error.value.__cause__ is cause
     assert mock_collection.upsert.call_count == 2
+
+
+def test_document_listing_and_scoped_deletion_are_paginated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use real persistence and force reads/deletes through multiple pages."""
+    monkeypatch.setattr("distribuai.rag.vector_store._DOCUMENT_BATCH_SIZE", 2)
+    directory = tmp_path / "collection"
+    collection = open_vector_collection(directory)
+    assert list_documents(collection) == []
+    assert delete_document(collection, "Missing.pdf") == 0
+    name = "Shipping & Returns.pdf"
+    records = [
+        replace(_record(1, name), page_number=4),
+        replace(_record(2, name), page_number=4),
+        replace(_record(3, name), page_number=1),
+        _record(4, "Another.pdf"),
+        _record(5, "Another.pdf"),
+    ]
+    store_embedded_chunks(collection, records[:1])
+    assert list_documents(collection) == [(name, 1, [4])]
+    store_embedded_chunks(collection, records[1:])
+    assert list_documents(collection) == [("Another.pdf", 2, [5, 6]), (name, 3, [1, 4])]
+
+    pdf = tmp_path / name
+    pdf.write_bytes(b"synthetic file bytes")
+    assert delete_document(collection, name) == 3
+    assert delete_document(collection, name) == 0
+    assert pdf.read_bytes() == b"synthetic file bytes"
+    reopened = open_vector_collection(directory)
+    assert reopened.count() == 2
+    assert list_documents(reopened) == [("Another.pdf", 2, [5, 6])]
+    assert set(reopened.get(include=[])["ids"]) == {"chunk-4", "chunk-5"}
+
+
+@pytest.mark.parametrize("source", ["", " ", ".", "..", "private/file.pdf", r"C:\private\file.pdf", "NUL.pdf"])
+def test_delete_rejects_invalid_source_before_database_access(mock_collection: Mock, source: str) -> None:
+    with pytest.raises(ValueError, match="source"):
+        delete_document(mock_collection, source)
+    mock_collection.get.assert_not_called()
+    mock_collection.delete.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("metadata", "message"),
+    [(None, "citation metadata"), ({"page_number": 1}, "source filename"),
+     ({"source_file": "/file.pdf", "page_number": 1}, "source filename"),
+     ({"source_file": "File.pdf"}, "page number"),
+     ({"source_file": "File.pdf", "page_number": True}, "page number")],
+)
+def test_listing_rejects_missing_or_invalid_metadata(mock_collection: Mock, metadata: object, message: str) -> None:
+    mock_collection.get.return_value = {"ids": ["chunk-1"], "metadatas": [metadata]}
+    with pytest.raises(VectorStoreError, match=message):
+        list_documents(mock_collection)
+
+
+def test_document_read_and_delete_errors_keep_their_cause(mock_collection: Mock) -> None:
+    cause = RuntimeError("synthetic storage failure")
+    mock_collection.get.side_effect = cause
+    with pytest.raises(VectorStoreError, match="Could not read") as read_error:
+        list_documents(mock_collection)
+    assert read_error.value.__cause__ is cause
+
+    mock_collection.get.side_effect = None
+    mock_collection.get.return_value = {"ids": ["chunk-1"]}
+    mock_collection.delete.side_effect = cause
+    with pytest.raises(VectorStoreError, match="Could not delete") as delete_error:
+        delete_document(mock_collection, "Rules & Policy.pdf")
+    assert delete_error.value.__cause__ is cause
+    mock_collection.get.assert_called_with(where={"source_file": "Rules & Policy.pdf"}, limit=256, offset=0, include=[])
+    mock_collection.delete.assert_called_once_with(ids=["chunk-1"], where={"source_file": "Rules & Policy.pdf"})

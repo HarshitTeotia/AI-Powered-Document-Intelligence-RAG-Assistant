@@ -14,7 +14,7 @@ The intended system will use Retrieval-Augmented Generation (RAG) to answer
 questions using company documents and cite its sources.
 
 **Implemented:** project setup, PDF text extraction with selective OCR, text chunking,
-local chunk embeddings, persistent vector storage, and semantic retrieval.
+local chunk embeddings, persistent vector storage, PDF ingestion, and semantic retrieval.
 **Planned:** document uploads, grounded answers, and the interface.
 There is no functional chatbot or runnable Streamlit application yet.
 
@@ -242,13 +242,46 @@ embedding function disabled.
 content with the same filename and chunk settings updates existing IDs rather than
 increasing the record count. Records store the original text with the source
 filename, 1-based page number, 1-based chunk index, and token count. Modified
-content or chunk settings can produce new IDs. Previous versions remain in the
-collection until document management is added. Batches are separate writes, so
-earlier batches may remain stored if a later batch fails.
+content or chunk settings can produce new IDs. Use `ingest_pdf()` to replace
+stale chunks after a successful upsert.
 
 The persistent directory contains document text, embeddings, and citation metadata.
 Protect it using the same local access controls as the source PDFs. Its contents
 are Git-ignored to keep document data and local database files out of the repository.
+
+### PDF ingestion and document management
+
+`ingest_pdf(pdf_path, collection, source_name=None)` runs extraction with OCR
+fallback, page-aware chunking, embedding, and ChromaDB storage. The citation
+filename defaults to the PDF basename. An explicit filename is a separate
+document identity if it differs from the basename. Filenames and original
+1-based page numbers are preserved for citations.
+
+The default chunk size and overlap are 800/100 characters. If embedding detects
+an oversized chunk, ingestion re-chunks the entire document at 700/90, 600/80,
+500/70, and 400/60 in that order until one configuration succeeds. This keeps
+one chunk configuration per stored version. No text is silently truncated, and
+even 400 characters can exceed the model's token limit for some inputs.
+
+`IngestionResult` reports the filename, original page count, stored chunk count,
+successful chunk settings, OCR page count, stale chunks removed, and empty page
+numbers. A separate native extraction pass counts pages flagged for OCR because
+the OCR function does not expose its attempt count. The extra pass preserves the
+existing API and adds extraction overhead.
+
+Stable IDs make identical re-ingestion logically idempotent. For edited PDFs,
+ingestion confirms that the new IDs are stored before deleting stale IDs under
+the same filename. Upserts and deletes are separate operations. A failed upsert
+can leave partial new writes, and a failed cleanup can leave both versions.
+Serialize operations for the same filename. Stronger atomic replacement would
+require additional design.
+
+`list_documents()` returns each filename, its stored chunk count, and its sorted
+distinct pages. `delete_document(collection, source_file)` removes only that
+filename's stored chunks and returns the number removed. The original PDF is
+kept. Uploaded PDFs and local vector data remain Git-ignored. Streamlit uploads
+and Gemini answer generation are planned.
+
 ### Semantic retrieval
 
 `retrieve(collection, question, top_k=5, source_file=None)` returns up to five

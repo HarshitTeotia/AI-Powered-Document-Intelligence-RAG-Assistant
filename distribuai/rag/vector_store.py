@@ -1,5 +1,6 @@
-"""Persist precomputed document embeddings and citations in local ChromaDB."""
+"""Persist and manage precomputed document embeddings in local ChromaDB."""
 
+from collections.abc import Iterator, Mapping, Sequence
 from numbers import Real
 from pathlib import Path, PureWindowsPath
 from typing import override
@@ -10,14 +11,16 @@ from chromadb.config import Settings
 from chromadb.telemetry.product import ProductTelemetryClient, ProductTelemetryEvent
 
 from distribuai import config
+from distribuai.rag.chunking import _safe_filename
 from distribuai.rag.embeddings import EMBEDDING_DIMENSION, EmbeddedChunk
 
 COLLECTION_NAME = "distribuai_documents"
 _MAX_FLOAT32 = 3.4028234663852886e38
+_DOCUMENT_BATCH_SIZE = 256
 
 
 class VectorStoreError(Exception):
-    """Local storage could not be initialized, validated, or written."""
+    """A local vector store operation failed or returned invalid data."""
 
 
 class _DisabledProductTelemetry(ProductTelemetryClient):
@@ -177,3 +180,89 @@ def _validate_records(records: list[EmbeddedChunk]) -> None:
                 raise TypeError(f"Record {position} vector values must be numeric.")
             if not -_MAX_FLOAT32 <= value <= _MAX_FLOAT32:
                 raise ValueError(f"Record {position} vector values must be finite float32 values.")
+
+
+def list_documents(collection: Collection) -> list[tuple[str, int, list[int]]]:
+    """List each filename, stored chunk count, and sorted distinct page numbers."""
+    counts: dict[str, int] = {}
+    pages: dict[str, set[int]] = {}
+    for _, metadata in _scan_document_records(collection, include_metadata=True):
+        if not isinstance(metadata, Mapping):
+            raise VectorStoreError("A stored record is missing citation metadata.")
+        try:
+            filename = _require_source_filename(metadata.get("source_file"))
+        except (TypeError, ValueError) as exc:
+            raise VectorStoreError("A stored record has an invalid source filename.") from exc
+        page = metadata.get("page_number")
+        if type(page) is not int or page < 1:
+            raise VectorStoreError("A stored record has an invalid page number.")
+        counts[filename] = counts.get(filename, 0) + 1
+        pages.setdefault(filename, set()).add(page)
+    return [(name, counts[name], sorted(pages[name])) for name in sorted(counts)]
+
+
+def delete_document(collection: Collection, source_file: str) -> int:
+    """Delete only one filename's stored chunks, leaving the PDF file intact."""
+    source_file = _require_source_filename(source_file)
+    ids = sorted(_source_chunk_ids(collection, source_file))
+    return _delete_source_chunks(collection, source_file, ids)
+
+
+def _require_source_filename(value: object) -> str:
+    """Accept a valid citation filename without normalizing away directories."""
+    if not isinstance(value, str):
+        raise TypeError("source filename must be a string.")
+    if _safe_filename(value) != value:
+        raise ValueError("source filename must be a plain filename without directories.")
+    return value
+
+
+def _source_chunk_ids(collection: Collection, source_file: str) -> set[str]:
+    """Read IDs for one source without fetching text, metadata, or vectors."""
+    return {chunk_id for chunk_id, _ in _scan_document_records(collection, source_file)}
+
+
+def _scan_document_records(
+    collection: Collection, source_file: str | None = None, *, include_metadata: bool = False
+) -> Iterator[tuple[str, object]]:
+    """Read a local record snapshot in pages without loading embeddings or text."""
+    where = None if source_file is None else {"source_file": source_file}
+    seen: set[str] = set()
+    offset = 0
+    while True:
+        try:
+            result = collection.get(
+                where=where, limit=_DOCUMENT_BATCH_SIZE, offset=offset,
+                include=["metadatas"] if include_metadata else [],
+            )
+        except Exception as exc:
+            raise VectorStoreError("Could not read stored document records.") from exc
+        if not isinstance(result, Mapping) or not isinstance(ids := result.get("ids"), list):
+            raise VectorStoreError("ChromaDB returned invalid document record IDs.")
+        metadata = result.get("metadatas") if include_metadata else [None] * len(ids)
+        if not isinstance(metadata, list) or len(ids) != len(metadata):
+            raise VectorStoreError("ChromaDB returned missing or incomplete citation metadata.")
+        for chunk_id, item in zip(ids, metadata, strict=True):
+            if not isinstance(chunk_id, str) or not chunk_id.strip() or chunk_id in seen:
+                raise VectorStoreError("ChromaDB returned a missing or duplicate document record ID.")
+            seen.add(chunk_id)
+            yield chunk_id, item
+        if len(ids) < _DOCUMENT_BATCH_SIZE:
+            return
+        offset += len(ids)
+
+
+def _delete_source_chunks(collection: Collection, source_file: str, ids: Sequence[str]) -> int:
+    """Delete selected IDs within a single source, in bounded batches."""
+    for offset in range(0, len(ids), _DOCUMENT_BATCH_SIZE):
+        try:
+            collection.delete(
+                ids=list(ids[offset:offset + _DOCUMENT_BATCH_SIZE]),
+                where={"source_file": source_file},
+            )
+        except Exception as exc:
+            raise VectorStoreError(
+                f"Could not delete stored chunks for {source_file}. "
+                f"Earlier batches may have removed {offset} chunks."
+            ) from exc
+    return len(ids)

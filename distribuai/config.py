@@ -23,3 +23,12 @@ TESSERACT_CMD: str | None = os.environ.get("TESSERACT_CMD", "").strip() or None
 # Character counts. The embedding stage must check its actual token budget.
 CHUNK_SIZE: int = 800
 CHUNK_OVERLAP: int = 100
+
+# Retry whole documents at smaller character limits after a token-limit failure.
+INGESTION_CHUNK_RETRY_SETTINGS: tuple[tuple[int, int], ...] = (
+    (CHUNK_SIZE, CHUNK_OVERLAP),
+    (700, 90),
+    (600, 80),
+    (500, 70),
+    (400, 60),
+)

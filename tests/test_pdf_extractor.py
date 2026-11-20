@@ -1,11 +1,12 @@
 """Exercise native extraction with synthetic PDFs and controlled failures."""
 
 from pathlib import Path
-from unittest.mock import ANY, patch
+from unittest.mock import ANY, Mock, PropertyMock, patch
 
 import pdfplumber
 import pytest
 from pdfplumber.page import Page
+from pdfplumber.table import Table
 
 from distribuai.ingestion.pdf_extractor import (
     MIN_TEXT_CHARS,
@@ -108,6 +109,82 @@ def test_passes_x_tolerance_to_page_extraction(tmp_path: Path) -> None:
         extract_pdf_pages(source)
 
     extract.assert_called_once_with(ANY, x_tolerance=X_TOLERANCE)
+
+
+def test_formats_table_rows_once_in_page_order(tmp_path: Path) -> None:
+    """Replace table text at its original location and join wrapped cells."""
+    source = _write_pdf(
+        tmp_path / "table.pdf", "Before\nProduct Pack size\nPremium\nRice 10 kg\nAtta 5 kg\nAfter"
+    )
+    with pdfplumber.open(source) as pdf:
+        lines = pdf.pages[0].extract_text_lines()
+    table = Mock(spec=Table)
+    table.bbox = (0, lines[1]["top"], 612, lines[4]["bottom"])
+    table.extract.return_value = [
+        ["Product", "Pack\nsize"], ["Premium\nRice", "10 kg"], ["Atta", "5 kg"],
+    ]
+
+    with patch.object(Page, "find_tables", autospec=True, return_value=[table]):
+        pages = extract_pdf_pages(source)
+
+    assert pages == [PdfPage(
+        1, "Before\nProduct: Premium Rice | Pack size: 10 kg\nProduct: Atta | Pack size: 5 kg\nAfter",
+        False,
+    )]
+    table.extract.assert_called_once_with(x_tolerance=X_TOLERANCE)
+
+
+@pytest.mark.parametrize("detection_fails", [False, True])
+def test_plain_text_when_no_tables_or_detection_fails(
+    tmp_path: Path, detection_fails: bool
+) -> None:
+    """Use normal extraction for pages without a usable table result."""
+    source = _write_pdf(tmp_path / "plain.pdf", "Normal page text\nSecond line.")
+    cause = RuntimeError("Synthetic detection failure") if detection_fails else None
+
+    with patch.object(Page, "find_tables", autospec=True, return_value=[], side_effect=cause):
+        pages = extract_pdf_pages(source)
+
+    assert pages == [PdfPage(1, "Normal page text\nSecond line.", False)]
+
+
+def test_tagged_table_reuses_headers_on_continuation_page(tmp_path: Path) -> None:
+    """Use semantic cells for a borderless table with page-local identifiers."""
+    source = _write_pdf(
+        tmp_path / "tagged.pdf", "Before\nProduct\nSize\nBasmati\nRice\n10 kg", "Atta\n5 kg\nAfter"
+    )
+    original_chars = Page.chars.fget
+    assert original_chars is not None
+
+    def tagged_chars(page: Page) -> list[dict[str, object]]:
+        chars = original_chars(page)
+        if type(page) is not Page:
+            return chars
+        markers = ([None, 1, 2, 3, 3, 4], [1, 2, None])[page.page_number - 1]
+        by_top = dict(zip(sorted({char["top"] for char in chars}), markers, strict=True))
+        for char in chars:
+            char["mcid"] = by_top[char["top"]]
+        return chars
+
+    def row(kind: str, page: int, *mcids: int) -> dict[str, object]:
+        return {"type": "TR", "children": [
+            {"type": kind, "children": [{"type": "P", "page_number": page, "mcids": [mcid]}]}
+            for mcid in mcids
+        ]}
+
+    structure = [{"type": "Table", "children": [
+        row("TH", 1, 1, 2), row("TD", 1, 3, 4), row("TD", 2, 1, 2),
+    ]}]
+    with (
+        patch.object(pdfplumber.PDF, "structure_tree", new_callable=PropertyMock, return_value=structure),
+        patch.object(Page, "chars", new=property(tagged_chars)),
+    ):
+        pages = extract_pdf_pages(source)
+
+    assert pages == [
+        PdfPage(1, "Before\nProduct: Basmati Rice | Size: 10 kg", False),
+        PdfPage(2, "Product: Atta | Size: 5 kg\nAfter", False),
+    ]
 
 
 def test_flags_only_text_strictly_below_threshold(tmp_path: Path) -> None:

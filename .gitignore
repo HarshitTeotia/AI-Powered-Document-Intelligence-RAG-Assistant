@@ -53,3 +53,5 @@ huggingface/
 .torch/
 torch_cache/
 sentence_transformers/
+
+.tmp_pytest/

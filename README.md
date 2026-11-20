@@ -14,8 +14,10 @@ The intended system will use Retrieval-Augmented Generation (RAG) to answer
 questions using company documents and cite its sources.
 
 **Implemented:** project setup, PDF text extraction with selective OCR, text chunking,
-local chunk embeddings, persistent vector storage, PDF ingestion, and semantic retrieval.
-**Planned:** document uploads, grounded answers, and the interface.
+local chunk embeddings, persistent vector storage, PDF ingestion, semantic retrieval,
+retrieval evaluation, and grounded Gemini answers from supplied excerpts.
+**Planned:** document uploads through Streamlit, a chat interface, and end-to-end
+answer-quality evaluation.
 There is no functional chatbot or runnable Streamlit application yet.
 
 ## Intended users
@@ -26,8 +28,6 @@ There is no functional chatbot or runnable Streamlit application yet.
 ## Planned features
 
 - Upload company PDFs through the application.
-- Chunk document text and embed it locally.
-- Generate answers with source citations from retrieved passages.
 - Provide a Streamlit interface and evaluate answer quality.
 
 ## Locked technology stack
@@ -47,14 +47,14 @@ dependencies are included.
 | Pandas | 2.2.3 | [Evaluation and analysis](https://pypi.org/project/pandas/2.2.3/) |
 | Pytest | 8.3.5 | [Testing](https://pypi.org/project/pytest/8.3.5/) |
 | google-genai | 1.51.0 | [Gemini API SDK](https://pypi.org/project/google-genai/1.51.0/) |
-| python-dotenv | 1.2.1 | [Future .env loading](https://pypi.org/project/python-dotenv/1.2.1/) |
+| python-dotenv | 1.2.1 | [Gemini .env loading](https://pypi.org/project/python-dotenv/1.2.1/) |
 
 These are explicit release pins, not a claim that they are the latest releases.
 Release existence for the two Gemini setup additions was verified against the
 linked PyPI release pages. Full dependency resolution is not verified.
 Direct pins do not lock the entire transitive dependency graph.
 
-OCR uses the Tesseract system executable. Answer generation will use Google's
+OCR uses the Tesseract system executable. Answer generation uses Google's
 Gemini API with the user's own API key.
 Git/GitHub is the intended version-control workflow; setup initializes only local
 Git, without a remote, commit, or push.
@@ -71,12 +71,11 @@ Streamlit -> upload and question/answer interface
 Pandas -> evaluation and analysis
 ```
 
-PDF extraction, OCR, and chunking are implemented. Configuration lives in
-`distribuai/config.py`:
-repository-relative upload and vector-store paths, the embedding model identifier,
-`GEMINI_API_KEY` read from `os.environ` without a fallback key, and `GEMINI_MODEL`
+`distribuai/config.py` defines repository-relative upload and vector-store paths,
+the embedding model identifier, `GEMINI_API_KEY` read from `os.environ` without
+a fallback key, and `GEMINI_MODEL`
 (default `gemini-2.5-flash`, overridden by the environment variable of the same
-name). An unset key remains `None`; validation is deferred to future API integration.
+name). Generation validates the key when it needs a Gemini client.
 Importing configuration does not load `.env` files, create directories, load
 models, or contact services.
 
@@ -112,16 +111,16 @@ The current repository folder is the project root; no nested root is required.
 
 - Windows with PowerShell, Python 3.12 (64-bit), pip, and Git.
 - Network access to install Python packages during local setup.
-- Internet access and a valid personal Gemini API key for future answer generation.
+- Internet access and a valid personal Gemini API key for answer generation.
 - Sufficient disk space for the ML packages and, in later phases, model files.
 
 OCR requires a separate Tesseract installation with English language data
 (`eng.traineddata`). Tesseract is optional for PDFs with sufficient native text.
 The embedding model `sentence-transformers/all-MiniLM-L6-v2` will need a separate
 download later. Setup does not download models or install system tools. Gemini
-answer generation will require internet access; the application will not be fully
-offline. API quotas and rate limits depend on the selected model and project tier;
-check the [current Gemini rate limits](https://ai.google.dev/gemini-api/docs/rate-limits).
+answer generation requires internet access. API quotas and rate limits depend on
+the selected model and project tier.
+[Current Gemini rate limits](https://ai.google.dev/gemini-api/docs/rate-limits).
 
 ## Local setup instructions
 
@@ -280,7 +279,7 @@ require additional design.
 distinct pages. `delete_document(collection, source_file)` removes only that
 filename's stored chunks and returns the number removed. The original PDF is
 kept. Uploaded PDFs and local vector data remain Git-ignored. Streamlit uploads
-and Gemini answer generation are planned.
+are planned.
 
 ### Semantic retrieval
 
@@ -293,9 +292,46 @@ space. Questions that exceed the model's token limit are rejected before encodin
 Lower cosine distance means a closer match. Cosine similarity is `1 - distance`.
 Each result includes both scores, its rank, the original text, and citation
 coordinates such as the filename and page number. The closest passages can still
-be irrelevant. A future similarity threshold needs evaluation on labeled examples
-before it can support decisions about insufficient evidence. Retrieval returns
-passages for review. Gemini answer generation is planned.
+be irrelevant. Similarity scores alone cannot establish answerability.
+
+### Gemini grounded answer generation
+
+Pass a question and up to five passages from semantic retrieval to
+`generate_grounded_answer(question, retrieved_chunks)` in
+`distribuai.rag.generation`. The Gemini API receives the question and actual
+excerpts. The system instruction asks Gemini to use only the evidence and treat
+all PDF text and source labels as untrusted data. It assesses the excerpts without
+a similarity cutoff.
+
+Python validates Gemini's structured JSON and checks every supporting quote
+against the cited chunk's exact text. It builds citations using the original chunk
+ID, filename, and page. A response with insufficient evidence gets a fixed refusal.
+A question about a specific order's live status or details gets a message saying
+that an authorized order-system lookup is required. Empty retrieval returns a
+refusal locally. Configuration, API, and response failures raise distinct errors.
+
+Generation lazily loads the project `.env` with `python-dotenv`. Existing
+environment variables take precedence. `GEMINI_API_KEY` supplies the credential
+and `GEMINI_MODEL` overrides the model configured in `distribuai/config.py`.
+Importing the module requires neither a key nor an API request.
+
+Exact quote matching verifies that the quote appears in its source. Whether it
+supports every claim in the answer still requires review. Separating instructions
+from untrusted data and checking citations reduce prompt-injection risk, but a
+model can still be misled. Use the fictional sample PDFs for live verification.
+Sending private or sensitive document excerpts to Google requires appropriate
+authorization and privacy controls. A Streamlit interface, threshold calibration,
+and end-to-end answer-quality evaluation are planned separately.
+
+For a live smoke check, activate the Python 3.12 environment from the project
+root and configure the key. In a child Python process, ingest the four fictional
+PDFs into a temporary ChromaDB directory created by PowerShell outside the
+repository. Retrieve five passages per question and check returns and credit
+terms for `answered`, a question about an automatic bulk discount for
+`not_in_documents`, and a dispatch question for a specific order for `order_lookup`.
+Check the quotes and page numbers for both answered questions, then remove the
+temporary directory from PowerShell after Python exits. Skip the live check if a
+key is unavailable.
 
 `.env.example` contains blank entries for `GEMINI_API_KEY` and `TESSERACT_CMD`.
 Copy it to an ignored local file and edit that file privately:
@@ -304,12 +340,10 @@ Copy it to an ignored local file and edit that file privately:
 Copy-Item .env.example .env
 ```
 
-The config module reads the process environment only. Merely creating `.env` does
-not load its contents; automatic loading with the approved `python-dotenv` package
-is planned for a later phase. Set `GEMINI_API_KEY` in the process environment before
-importing configuration when needed, and optionally set `GEMINI_MODEL` to a model
-available to your API project. Do not commit or print real keys. The setup test
-requires neither a key nor network access.
+Set `GEMINI_API_KEY` in that file or the process environment. Optionally set
+`GEMINI_MODEL` to a model available to your API project. Keep real keys out of Git
+and terminal output. The setup and generation unit tests require neither a key
+nor network access.
 
 ## Running tests
 
@@ -320,7 +354,8 @@ python -m pytest -q
 ```
 
 The suite verifies the scaffold, PDF extraction, OCR, chunking, embeddings, local
-storage, and retrieval. The regular OCR tests simulate the executable. One optional smoke test uses a
+storage, retrieval, and Gemini generation. Generation tests use mocked clients.
+The regular OCR tests simulate the executable. One optional smoke test uses a
 synthetic PDF and real Tesseract, and skips if the executable is unavailable.
 
 ## Evaluation approach
@@ -330,6 +365,35 @@ to measure source hits and evidence coverage. Page hits and reciprocal rank
 require labeled pages. Answer grounding, citation accuracy in generated answers,
 and refusal on insufficient evidence belong to later evaluation.
 
+### Running the retrieval evaluation
+
+From the repository root in PowerShell with the virtual environment active:
+
+```powershell
+$env:HF_HUB_OFFLINE = '1'
+$env:TESSERACT_CMD = 'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
+python -B eval/evaluate_retrieval.py
+python -B eval/evaluate_retrieval.py --csv eval/questions.csv --csv eval/questions_extra.csv
+python -B eval/evaluate_retrieval.py --csv eval/questions.csv --csv eval/questions_extra.csv --uploads data/uploads --top-k 5
+```
+
+The default uses only `eval/questions.csv`. Repeat `--csv` to choose the files to
+evaluate, with unique question IDs across them. The combined examples require
+`eval/questions_extra.csv` to be present. `--uploads` selects which directory to
+scan for PDFs. `--top-k` changes the retrieval depth, with a minimum of five.
+Hit@1/@3/@5 and evidence coverage@5 keep their fixed cutoffs. MRR uses the first
+accepted file and page within the retrieved depth. Unlabelled questions still
+count for file hits and evidence coverage.
+
+The evaluator uses the real ingestion pipeline and cached embedding model in
+a temporary ChromaDB index outside the repository. It reports source hits,
+evidence coverage, and per-question similarities, including unsupported and
+order-lookup questions. The parent checks PDF and CSV hashes and cleans up after
+the database-owning child exits. The main index stays untouched. The report
+measures retrieval. End-to-end answer quality and similarity threshold calibration
+remain separate tasks.
+
 ## Security and responsible-AI considerations
 
 Customer uploads, vector-store contents, secrets, virtual environments, and local
@@ -338,21 +402,18 @@ Git ignore rules are not access controls or encryption. Store sensitive document
 only on appropriately protected machines and define retention/deletion practices
 before adding real data.
 
-Future work must treat retrieved document text as untrusted input, address prompt
-injection, support insufficient-evidence responses, and retain human review for
-customer-facing answers. In the planned Gemini integration, questions and retrieved
-document text will be sent to Google for answer generation. Review customer consent,
-data sensitivity, and Google's applicable data-use terms before enabling real-data
-use. Dependency telemetry and network behavior must also be reviewed.
-These application safeguards are planned, not implemented.
+Gemini generation sends questions and retrieved document text to Google. Review
+customer consent, data sensitivity, and Google's applicable data-use terms before
+enabling real-data use. Production safeguards still require review, including
+human review of customer-facing answers and dependency telemetry and network behavior.
 
 ## Known limitations
 
-- PDF extraction, OCR, chunking, embedding, local storage, and retrieval are
-  available as Python functions. LLM calls, answer citations, and the UI are planned.
+- PDF extraction, OCR, chunking, embedding, local storage, retrieval, and grounded
+  generation are available as Python functions. The caller supplies the passages.
 - No models or system tools were installed or downloaded.
 - Gemini requires an API key and internet access, is subject to rate limits, and
-  sends retrieved document text to Google. API requests are not implemented yet.
+  receives retrieved document text during generation.
 - Python 3.12 setup testing does not verify full dependency compatibility.
 - OCR accuracy, answer quality, hardware performance, and production suitability
   have not been evaluated.
@@ -385,8 +446,8 @@ Validation on November 20, 2026:
 
 1. Project scaffold and setup validation (complete).
 2. PDF extraction and selective OCR (complete).
-3. Chunking, embeddings, and local vector persistence.
-4. Retrieval and Gemini API answers with source citations.
+3. Chunking, embeddings, and local vector persistence (complete).
+4. Retrieval and Gemini API answers with source citations (Python APIs complete).
 5. Streamlit support workflow.
 6. Evaluation and security/responsible-AI review.
 

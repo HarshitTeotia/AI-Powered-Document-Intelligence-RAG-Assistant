@@ -15,7 +15,9 @@ from distribuai.ingestion.pdf_extractor import (
 )
 
 
-def _write_pdf(path: Path, *pages: str, font_encoding: bytes = b"") -> Path:
+def _write_pdf(
+    path: Path, *pages: str, font_encoding: bytes = b"", font_size: int = 12
+) -> Path:
     """Write a minimal PDF with one stream of ASCII text per page."""
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -32,7 +34,7 @@ def _write_pdf(path: Path, *pages: str, font_encoding: bytes = b"") -> Path:
             f"/Contents {page_id + 1} 0 R >>"
         )
         objects.append(page_object.encode("ascii"))
-        commands = ["BT /F1 12 Tf 18 TL 72 720 Td"]
+        commands = [f"BT /F1 {font_size} Tf 18 TL 72 720 Td"]
         for line in text.splitlines():
             literal = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
             commands.append(f"({literal}) Tj T*")

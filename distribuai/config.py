@@ -16,3 +16,6 @@ EMBEDDING_MODEL_ID: str = "sentence-transformers/all-MiniLM-L6-v2"
 # No fallback key: an unset variable stays None until future API validation.
 GEMINI_API_KEY: str | None = os.environ.get("GEMINI_API_KEY")
 GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+
+# Optional executable path. A blank or unset value uses Tesseract on PATH.
+TESSERACT_CMD: str | None = os.environ.get("TESSERACT_CMD", "").strip() or None

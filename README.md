@@ -13,8 +13,8 @@ local document processing and cloud-based answer generation through the Gemini A
 The intended system will use Retrieval-Augmented Generation (RAG) to answer
 questions using company documents and cite its sources.
 
-**Implemented:** project directories, shared configuration, dependency pins, Git
-ignore rules, and one filesystem setup test. **Planned:** all application features.
+**Implemented:** project setup and PDF text extraction with selective OCR.
+**Planned:** document uploads, retrieval, grounded answers, and the interface.
 There is no functional chatbot or runnable Streamlit application yet.
 
 ## Intended users
@@ -24,8 +24,7 @@ There is no functional chatbot or runnable Streamlit application yet.
 
 ## Planned features
 
-- Upload and extract text from company PDFs.
-- Render scanned pages and run OCR when needed.
+- Upload company PDFs through the application.
 - Chunk document text and embed it locally.
 - Persist embeddings in a local ChromaDB store.
 - Retrieve relevant passages and generate answers with source citations.
@@ -55,8 +54,8 @@ Release existence for the two Gemini setup additions was verified against the
 linked PyPI release pages. Full dependency resolution is not verified.
 Direct pins do not lock the entire transitive dependency graph.
 
-The system tool planned for later phases is Tesseract OCR. Answer generation will
-use Google's Gemini API with the user's own API key.
+OCR uses the Tesseract system executable. Answer generation will use Google's
+Gemini API with the user's own API key.
 Git/GitHub is the intended version-control workflow; setup initializes only local
 Git, without a remote, commit, or push.
 
@@ -64,7 +63,7 @@ Git, without a remote, commit, or push.
 
 ```text
 Company PDFs -> pdfplumber text extraction
-             -> scanned pages: pypdfium2 rendering -> Tesseract via pytesseract
+             -> pages with low text: pypdfium2 rendering -> Tesseract via pytesseract
 Extracted text -> chunks with source metadata
               -> all-MiniLM-L6-v2 embeddings -> local ChromaDB
 Question -> local retrieval -> Google Gemini API -> answer with citations
@@ -72,7 +71,8 @@ Streamlit -> upload and question/answer interface
 Pandas -> evaluation and analysis
 ```
 
-This diagram describes future work. Configuration lives in `distribuai/config.py`:
+The PDF extraction and OCR portion is implemented. Configuration lives in
+`distribuai/config.py`:
 repository-relative upload and vector-store paths, the embedding model identifier,
 `GEMINI_API_KEY` read from `os.environ` without a fallback key, and `GEMINI_MODEL`
 (default `gemini-2.5-flash`, overridden by the environment variable of the same
@@ -115,8 +115,8 @@ The current repository folder is the project root; no nested root is required.
 - Internet access and a valid personal Gemini API key for future answer generation.
 - Sufficient disk space for the ML packages and, in later phases, model files.
 
-Tesseract OCR requires a **separate system installation in a later phase**.
-It is not an entry in `requirements.txt` and is unnecessary for the setup test.
+OCR requires a separate Tesseract installation with English language data
+(`eng.traineddata`). Tesseract is optional for PDFs with sufficient native text.
 The embedding model `sentence-transformers/all-MiniLM-L6-v2` will need a separate
 download later. Setup does not download models or install system tools. Gemini
 answer generation will require internet access; the application will not be fully
@@ -151,8 +151,28 @@ python -m pip install --dry-run --ignore-installed -r requirements.txt
 
 There is no application launch command in this phase because no UI exists yet.
 
-`.env.example` contains only a blank `GEMINI_API_KEY=` entry. Copy it to an ignored
-local file and edit that file privately when preparing for future API integration:
+### PDF extraction and OCR
+
+`extract_pdf_with_ocr(Path)` reads native text with pdfplumber first. Only pages
+with fewer than 20 characters after trimming are rendered at approximately 300 DPI.
+Tesseract runs in English with a 30-second timeout per page. The result preserves
+page order and 1-based page numbers, keeps the longer text, and recalculates the
+OCR flag. OCR can misread numbers, tables, or poor-quality scans, and longer text
+does not guarantee a more accurate result.
+
+Set optional `TESSERACT_CMD` to the executable path, including any spaces, or
+leave it unset or blank to use Tesseract from `PATH`. Configuration reads the
+process environment at import time. To use a value from `.env`, the caller must
+load that file into the environment before importing DistribuAI configuration,
+for example by calling `load_dotenv()` from the entry point.
+
+OCR requests through this function run one at a time within the process. This
+protects the PDFium calls and the temporary executable setting in pytesseract.
+Other code using either library directly would need to coordinate with this path
+before running in concurrent Streamlit sessions.
+
+`.env.example` contains blank entries for `GEMINI_API_KEY` and `TESSERACT_CMD`.
+Copy it to an ignored local file and edit that file privately:
 
 ```powershell
 Copy-Item .env.example .env
@@ -173,9 +193,9 @@ With the Python 3.12 virtual environment active:
 python -m pytest -q
 ```
 
-Exactly one test verifies essential files and directories using portable paths.
-It uses no external service, downloaded model, or heavy ML import. A passing test
-confirms the scaffold exists; it does not validate future application behavior.
+The suite verifies the scaffold, native PDF extraction, and selective OCR. The
+regular OCR tests simulate the executable. One optional smoke test uses a
+synthetic PDF and real Tesseract, and skips if the executable is unavailable.
 
 ## Evaluation approach
 
@@ -203,8 +223,8 @@ These application safeguards are planned, not implemented.
 
 ## Known limitations
 
-- Setup only: no ingestion, OCR, chunking, embedding, retrieval, database operations,
-  LLM calls, citations, or user interface is implemented.
+- PDF extraction and OCR are available as Python functions. Chunking, embedding,
+  retrieval, database operations, LLM calls, citations, and the UI are planned.
 - No models or system tools were installed or downloaded.
 - Gemini requires an API key and internet access, is subject to rate limits, and
   sends retrieved document text to Google. API requests are not implemented yet.
@@ -238,8 +258,8 @@ Validation on November 20, 2026:
 
 ## Development roadmap
 
-1. Project scaffold and setup validation (current phase).
-2. PDF extraction and selective OCR.
+1. Project scaffold and setup validation (complete).
+2. PDF extraction and selective OCR (complete).
 3. Chunking, embeddings, and local vector persistence.
 4. Retrieval and Gemini API answers with source citations.
 5. Streamlit support workflow.

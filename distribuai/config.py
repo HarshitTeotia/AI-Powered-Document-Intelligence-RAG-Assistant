@@ -19,3 +19,7 @@ GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 # Optional executable path. A blank or unset value uses Tesseract on PATH.
 TESSERACT_CMD: str | None = os.environ.get("TESSERACT_CMD", "").strip() or None
+
+# Character counts. The embedding stage must check its actual token budget.
+CHUNK_SIZE: int = 900
+CHUNK_OVERLAP: int = 120

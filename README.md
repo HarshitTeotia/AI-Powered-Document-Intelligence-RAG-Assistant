@@ -13,7 +13,7 @@ local document processing and cloud-based answer generation through the Gemini A
 The intended system will use Retrieval-Augmented Generation (RAG) to answer
 questions using company documents and cite its sources.
 
-**Implemented:** project setup and PDF text extraction with selective OCR.
+**Implemented:** project setup, PDF text extraction with selective OCR, and text chunking.
 **Planned:** document uploads, retrieval, grounded answers, and the interface.
 There is no functional chatbot or runnable Streamlit application yet.
 
@@ -71,7 +71,7 @@ Streamlit -> upload and question/answer interface
 Pandas -> evaluation and analysis
 ```
 
-The PDF extraction and OCR portion is implemented. Configuration lives in
+PDF extraction, OCR, and chunking are implemented. Configuration lives in
 `distribuai/config.py`:
 repository-relative upload and vector-store paths, the embedding model identifier,
 `GEMINI_API_KEY` read from `os.environ` without a fallback key, and `GEMINI_MODEL`
@@ -171,6 +171,28 @@ protects the PDFium calls and the temporary executable setting in pytesseract.
 Other code using either library directly would need to coordinate with this path
 before running in concurrent Streamlit sessions.
 
+### Text cleaning and chunking
+
+`clean_text()` normalizes line endings, spaces, tabs, and excess blank lines
+while preserving useful line breaks, paragraphs, punctuation, and values such as
+dates, prices, and business IDs. `chunk_pdf_pages()` divides the cleaned pages into
+smaller passages for future retrieval and citations. It skips empty pages and
+keeps short, nonempty pages even when OCR is still flagged.
+
+The defaults are `CHUNK_SIZE = 900` and `CHUNK_OVERLAP = 120`, both in characters.
+Paragraph and sentence breaks help keep related text together. If neither fits,
+chunks break at whole words. A token longer than the limit, such as a long URL,
+is the exception and is hard-split into separate pieces. Overlap carries a suffix
+of whole words forward to preserve context when the next chunk has room for new
+text. Each chunk stays on one page and records the filename without directories,
+the original 1-based page number, and its 1-based index on that page.
+
+Stable chunk IDs use a SHA-256 fingerprint of the filename, ordered cleaned pages,
+and both chunk settings, followed by page and chunk indexes. This supports future
+deduplication. Uploaded-file identity and replacement belong to the storage stage.
+The character limits are heuristics. The embedding stage must validate actual
+token counts against the all-MiniLM-L6-v2 budget of about 256 tokens.
+
 `.env.example` contains blank entries for `GEMINI_API_KEY` and `TESSERACT_CMD`.
 Copy it to an ignored local file and edit that file privately:
 
@@ -223,7 +245,7 @@ These application safeguards are planned, not implemented.
 
 ## Known limitations
 
-- PDF extraction and OCR are available as Python functions. Chunking, embedding,
+- PDF extraction, OCR, and chunking are available as Python functions. Embedding,
   retrieval, database operations, LLM calls, citations, and the UI are planned.
 - No models or system tools were installed or downloaded.
 - Gemini requires an API key and internet access, is subject to rate limits, and

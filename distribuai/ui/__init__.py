@@ -1,1 +1,1 @@
-"""Reserved for the future Streamlit user interface."""
+"""Local Streamlit user interface for AI-Powered Document Intelligence & RAG Assistant."""

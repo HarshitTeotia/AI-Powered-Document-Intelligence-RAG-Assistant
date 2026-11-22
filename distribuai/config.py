@@ -32,3 +32,8 @@ INGESTION_CHUNK_RETRY_SETTINGS: tuple[tuple[int, int], ...] = (
     (500, 70),
     (400, 60),
 )
+
+
+def gemini_chat_enabled() -> bool:
+    """Read the operator's opt-in after the application has loaded its environment."""
+    return os.environ.get("GEMINI_CHAT_ENABLED", "").strip().casefold() == "true"

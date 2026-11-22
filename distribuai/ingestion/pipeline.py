@@ -7,7 +7,7 @@ from pathlib import Path
 from chromadb.api.models.Collection import Collection
 
 from distribuai import config
-from distribuai.ingestion.ocr_fallback import OcrError, extract_pdf_with_ocr
+from distribuai.ingestion.ocr_fallback import OcrError, _supplement_pdf_pages
 from distribuai.ingestion.pdf_extractor import PdfExtractionError, PdfPage, extract_pdf_pages
 from distribuai.rag.chunking import DocumentChunk, chunk_pdf_pages
 from distribuai.rag.embeddings import EmbeddedChunk, EmbeddingError, EmbeddingTokenLimitError, embed_chunks
@@ -105,15 +105,15 @@ def _validate_input(pdf_path: Path, collection: Collection, source_name: str | N
 
 
 def _extract_pages(pdf_path: Path, filename: str) -> tuple[list[PdfPage], int]:
-    """Count native OCR flags in a separate pass before running OCR fallback."""
+    """Extract native text once and retain the OCR attempt count."""
     try:
         native = extract_pdf_pages(pdf_path)
-        pages = extract_pdf_with_ocr(pdf_path)
+        pages, attempts = _supplement_pdf_pages(pdf_path, native)
     except (PdfExtractionError, OcrError, OSError, ValueError) as exc:
         raise IngestionError(f"PDF extraction or OCR failed for {filename}.") from exc
     if [page.page_number for page in native] != [page.page_number for page in pages]:
-        raise IngestionError(f"Page numbers changed between extraction passes for {filename}.")
-    return pages, sum(page.needs_ocr for page in native)
+        raise IngestionError(f"Page numbers changed during OCR for {filename}.")
+    return pages, attempts
 
 
 def _embed_document(pages: list[PdfPage], filename: str) -> tuple[list[EmbeddedChunk], int, int]:

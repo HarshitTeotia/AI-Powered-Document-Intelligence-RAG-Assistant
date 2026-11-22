@@ -65,7 +65,7 @@ def open_vector_collection(storage_dir: Path | None = None) -> Collection:
             embedding_function=None,
         )
     except Exception as exc:
-        raise VectorStoreError("Could not open or create the DistribuAI collection.") from exc
+        raise VectorStoreError("Could not open or create the local document collection.") from exc
 
     _validate_collection(collection)
     try:

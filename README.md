@@ -1,40 +1,42 @@
-# DistribuAI
+# AI-Powered Document Intelligence & RAG Assistant
+
+[Task 1 final report](docs/TASK_1_FINAL_REPORT.md) · [Dataset audit](docs/TASK_1_DATASET_AUDIT.md) · [Source manifest](docs/DATA_SOURCE_MANIFEST.md) · [2–3 minute demo guide](docs/TASK_1_DEMO_GUIDE.md)
 
 ## Business problem
 
 Distribution support teams need to find reliable answers across company PDFs,
 including scanned documents. Manual searches can slow responses and make it
 difficult to identify the document supporting an answer.
+The assistant gives support staff a way to look up shipping, returns, products, and
+payment policies with source quotations. A customer service manager can use the
+[pilot measurement plan](docs/TASK_1_FINAL_REPORT.md#illustrative-business-value) to assess time savings and quality. The estimates are illustrative.
 
 ## Project overview
 
-DistribuAI is a planned document intelligence and customer-support assistant with
+This project is a local document intelligence and customer-support prototype with
 local document processing and cloud-based answer generation through the Gemini API.
-The intended system will use Retrieval-Augmented Generation (RAG) to answer
+It uses Retrieval-Augmented Generation (RAG) to answer
 questions using company documents and cite its sources.
 
 **Implemented:** project setup, PDF text extraction with selective OCR, text chunking,
 local chunk embeddings, persistent vector storage, PDF ingestion, semantic retrieval,
-retrieval evaluation, and grounded Gemini answers from supplied excerpts.
-**Planned:** document uploads through Streamlit, a chat interface, and end-to-end
-answer-quality evaluation.
-There is no functional chatbot or runnable Streamlit application yet.
+retrieval evaluation, grounded Gemini answers, and a Streamlit interface for
+document management and chat.
+Independent live answer-quality grading remains pending. The Task 1 evidence includes
+retrieval measurements, an offline generation replay, and a mocked browser walkthrough.
 
 ## Intended users
 
 - Customer-support agents at distribution businesses.
 - Internal staff who need to locate company document information.
 
-## Planned features
-
-- Upload company PDFs through the application.
-- Provide a Streamlit interface and evaluate answer quality.
-
 ## Locked technology stack
 
-Python 3.12 and the following ten direct Python dependencies are approved.
-Required transitive dependencies are installed by pip; no additional direct
-dependencies are included.
+Use Python 3.12 and the [pinned dependencies](requirements.txt). The app uses Streamlit,
+pdfplumber and Tesseract, local all-MiniLM-L6-v2 embeddings, ChromaDB, and the Gemini API.
+
+<details>
+<summary>Dependency pins and implementation tools</summary>
 
 | Dependency | Version | Planned use / release metadata |
 | --- | --- | --- |
@@ -49,17 +51,11 @@ dependencies are included.
 | google-genai | 1.51.0 | [Gemini API SDK](https://pypi.org/project/google-genai/1.51.0/) |
 | python-dotenv | 1.2.1 | [Gemini .env loading](https://pypi.org/project/python-dotenv/1.2.1/) |
 
-These are explicit release pins, not a claim that they are the latest releases.
-Release existence for the two Gemini setup additions was verified against the
-linked PyPI release pages. Full dependency resolution is not verified.
 Direct pins do not lock the entire transitive dependency graph.
 
-OCR uses the Tesseract system executable. Answer generation uses Google's
-Gemini API with the user's own API key.
-Git/GitHub is the intended version-control workflow; setup initializes only local
-Git, without a remote, commit, or push.
+</details>
 
-## Planned architecture
+## Architecture
 
 ```text
 Company PDFs -> pdfplumber text extraction
@@ -79,7 +75,8 @@ name). Generation validates the key when it needs a Gemini client.
 Importing configuration does not load `.env` files, create directories, load
 models, or contact services.
 
-## Project structure
+<details>
+<summary>Project structure</summary>
 
 The current repository folder is the project root; no nested root is required.
 
@@ -93,7 +90,9 @@ The current repository folder is the project root; no nested root is required.
 |   |-- rag/
 |   |   `-- __init__.py
 |   `-- ui/
-|       `-- __init__.py
+|       |-- __init__.py
+|       |-- app.py
+|       `-- service.py
 |-- data/
 |   |-- uploads/
 |   |   `-- .gitkeep
@@ -107,6 +106,8 @@ The current repository folder is the project root; no nested root is required.
 `-- README.md
 ```
 
+</details>
+
 ## Prerequisites
 
 - Windows with PowerShell, Python 3.12 (64-bit), pip, and Git.
@@ -116,8 +117,8 @@ The current repository folder is the project root; no nested root is required.
 
 OCR requires a separate Tesseract installation with English language data
 (`eng.traineddata`). Tesseract is optional for PDFs with sufficient native text.
-The embedding model `sentence-transformers/all-MiniLM-L6-v2` will need a separate
-download later. Setup does not download models or install system tools. Gemini
+The embedding model `sentence-transformers/all-MiniLM-L6-v2` downloads on first
+use if it is not already cached. Tesseract is installed separately. Gemini
 answer generation requires internet access. API quotas and rate limits depend on
 the selected model and project tier.
 [Current Gemini rate limits](https://ai.google.dev/gemini-api/docs/rate-limits).
@@ -148,7 +149,107 @@ To check resolution for the active Python 3.12 environment without installing:
 python -m pip install --dry-run --ignore-installed -r requirements.txt
 ```
 
-There is no application launch command in this phase because no UI exists yet.
+## Running the Streamlit application
+
+From the project root in PowerShell, activate the Python 3.12 environment. If
+`.env` is absent, copy `.env.example` to `.env`. Set
+`GEMINI_API_KEY` in your ignored `.env` or in the process environment. Set
+`GEMINI_MODEL` to the model enabled for your Gemini project. The backend's default
+is `gemini-2.5-flash` when no model override is set. For the local single-operator
+demo, set `GEMINI_CHAT_ENABLED=true` only when you are authorized to send relevant
+document excerpts to Google. Chat defaults to disabled. Environment variables take
+precedence over `.env`. Restart Streamlit after changing local settings. Local
+document management works when chat is disabled or the key is absent.
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+$env:HF_HUB_OFFLINE = '1'
+$env:TRANSFORMERS_OFFLINE = '1'
+$env:TESSERACT_CMD = 'C:\Program Files\Tesseract-OCR\tesseract.exe'
+python -m streamlit run distribuai/ui/app.py
+```
+
+Use offline mode after the embedding model has been cached. Omit the offline
+settings for the first model download. Adjust `TESSERACT_CMD` for your installation
+or use Tesseract from `PATH`. For a loopback-only listener, add
+`--server.address 127.0.0.1`. Stop the app with `Ctrl+C`.
+Restart Streamlit after editing the app. File watching is disabled to avoid
+Streamlit 1.45.1 probing PyTorch's dynamic classes after the model loads.
+
+- **Add PDFs.** Open **Add document**, choose one PDF up to 10 MiB, and select **Add to knowledge base**. If
+  `data/uploads/` contains PDFs, **Add demo documents** adds them on demand. This runs locally.
+  Adding a PDF again under the same name updates the existing entry.
+- **Manage documents.** The sidebar lists the documents in the knowledge base.
+  Open **Manage documents**, select a filename, check the confirmation, and click
+  **Remove document**. This removes it from the knowledge base and keeps the
+  original PDF. File uploads use an OS temporary file that is removed after
+  processing. Text, vectors, and metadata remain in `data/vector_store/` and
+  survive browser refreshes and application restarts.
+- **Ask and verify.** Type a question or select a suggested question to submit it immediately. Answering
+  sends the current question and up to five relevant document excerpts to Google
+  Gemini. Open **Sources** to inspect the filename, page number, and supporting
+  quote. Unsupported questions receive an insufficient-evidence message. Live
+  order questions require an authorized order-system lookup. Use **Clear chat** to
+  remove the current session's messages. Changes to the knowledge base also clear chat.
+
+Chat lasts for the browser session and is lost on refresh or restart. This local
+prototype has a shared index and no authentication or access controls. Public
+deployment or use with private documents requires appropriate access controls,
+external-processing authorization, and privacy review. Check cited passages before
+acting on an answer.
+
+For a local demonstration, index the four fictional sample PDFs, check the listing
+and document total, then refresh and re-index to confirm the same documents are listed.
+Check that chat is available after enabling it and configuring the key. Ask about the unopened-product
+return window, approved business credit, an automatic discount on 100 cartons, and
+the dispatch status of order `FD-2026-1042`. Inspect the return and credit sources
+and verify that the last two answers contain no invented policy or status. Clear
+the chat and confirm the documents remain. To exercise upload and deletion, use a
+new expendable PDF and confirm its deletion leaves the sample records and files
+intact. Try an invalid `.pdf` file to verify the upload error.
+
+## Performance notes
+
+MiniLM loads on first use. The process reuses the model and tokenizer, and each
+Streamlit session keeps its ChromaDB collection. Only submitting the upload form
+indexes a file. Ingestion reads native PDF text once and counts OCR attempts from
+that pass before supplementing sparse pages.
+
+On the tested Ryzen 5 4600H (6 cores, 12 logical processors, 6 PyTorch threads,
+CPU-only), the median total for all four sample PDFs dropped from **6.55 s to
+4.34 s** on a fresh index and from **6.03 s to 3.83 s** on the repeat pass. Each
+figure is the median of three runs. All four PDFs had usable native text, so the
+benchmark gives no scanned-PDF latency estimate. Local question timing used a
+simulated Gemini response with the real SDK client constructor.
+
+In a separate three-run model-load check with network access, the cached
+model's cold load took **9.89 s** with Hugging Face checks enabled and **0.14 s**
+with `HF_HUB_OFFLINE=1`. Leave offline mode unset for the first download.
+Once the model is cached, set it in PowerShell or uncomment it in the local
+`.env`. This flag controls the local model's Hugging Face access. Gemini chat
+still needs internet access.
+
+Run the [pipeline benchmark](eval/benchmark_pipeline.py) from the repository
+root with the four sample PDFs in `data/uploads/`. It uses disposable indexes
+outside the repo and makes zero Gemini requests by default. Add
+`--skip-network-check` to omit the network-enabled Hugging Face trial.
+
+```powershell
+python -B eval/benchmark_pipeline.py
+```
+
+## Source documents and reviewer setup
+
+The four local fictional PDFs in `data/uploads/` are Git-ignored. A fresh checkout
+does not include them. Obtain the approved copies listed in the
+[source inventory](docs/TASK_1_FINAL_REPORT.md#sources-and-reproducibility) and
+place them in that directory to reproduce the reported retrieval results. For a
+basic ingestion demo, add an approved or explicitly synthetic PDF via the UI.
+A different source set needs its own benchmark. The evaluation CSV and offline
+generation replay fixtures are included with the project files.
+
+<details>
+<summary>Backend reference and local diagnostics</summary>
 
 ### PDF extraction and OCR
 
@@ -162,7 +263,7 @@ does not guarantee a more accurate result.
 Set optional `TESSERACT_CMD` to the executable path, including any spaces, or
 leave it unset or blank to use Tesseract from `PATH`. Configuration reads the
 process environment at import time. To use a value from `.env`, the caller must
-load that file into the environment before importing DistribuAI configuration,
+load that file into the environment before importing the application configuration,
 for example by calling `load_dotenv()` from the entry point.
 
 OCR requests through this function run one at a time within the process. This
@@ -197,7 +298,7 @@ counts against the model's sequence limit.
 
 An embedding is a numeric representation of a passage. `embed_chunks()` converts
 document chunks to 384-dimensional vectors so future retrieval can compare passages
-by meaning. DistribuAI uses the compact `sentence-transformers/all-MiniLM-L6-v2`
+by meaning. The assistant uses the compact `sentence-transformers/all-MiniLM-L6-v2`
 model for local inference. Embeddings are normalized so similarity comparisons can
 use vector direction independently of magnitude. Each record keeps the original
 chunk ID, filename, and page number for future citations.
@@ -278,8 +379,7 @@ require additional design.
 `list_documents()` returns each filename, its stored chunk count, and its sorted
 distinct pages. `delete_document(collection, source_file)` removes only that
 filename's stored chunks and returns the number removed. The original PDF is
-kept. Uploaded PDFs and local vector data remain Git-ignored. Streamlit uploads
-are planned.
+kept. The local demo PDFs and vector data remain Git-ignored.
 
 ### Semantic retrieval
 
@@ -304,7 +404,8 @@ all PDF text and source labels as untrusted data. It assesses the excerpts witho
 a similarity cutoff.
 
 Python validates Gemini's structured JSON and checks every supporting quote
-against the cited chunk's exact text. It builds citations using the original chunk
+against the cited chunk. It preserves the original source span when a quote differs
+only in whitespace and matches uniquely. It builds citations using the original chunk
 ID, filename, and page. A response with insufficient evidence gets a fixed refusal.
 A question about a specific order's live status or details gets a message saying
 that an authorized order-system lookup is required. Empty retrieval returns a
@@ -320,8 +421,8 @@ supports every claim in the answer still requires review. Separating instruction
 from untrusted data and checking citations reduce prompt-injection risk, but a
 model can still be misled. Use the fictional sample PDFs for live verification.
 Sending private or sensitive document excerpts to Google requires appropriate
-authorization and privacy controls. A Streamlit interface, threshold calibration,
-and end-to-end answer-quality evaluation are planned separately.
+authorization and privacy controls. Threshold calibration and end-to-end
+answer-quality evaluation are separate work.
 
 For a live smoke check, activate the Python 3.12 environment from the project
 root and configure the key. In a child Python process, ingest the four fictional
@@ -333,17 +434,19 @@ Check the quotes and page numbers for both answered questions, then remove the
 temporary directory from PowerShell after Python exits. Skip the live check if a
 key is unavailable.
 
-`.env.example` contains blank entries for `GEMINI_API_KEY` and `TESSERACT_CMD`.
-Copy it to an ignored local file and edit that file privately:
+`.env.example` leaves credentials blank and sets `GEMINI_CHAT_ENABLED=false`.
+Create an ignored local copy if it is absent and edit it privately:
 
 ```powershell
-Copy-Item .env.example .env
+if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
 ```
 
 Set `GEMINI_API_KEY` in that file or the process environment. Optionally set
 `GEMINI_MODEL` to a model available to your API project. Keep real keys out of Git
 and terminal output. The setup and generation unit tests require neither a key
 nor network access.
+
+</details>
 
 ## Running tests
 
@@ -354,16 +457,19 @@ python -m pytest -q
 ```
 
 The suite verifies the scaffold, PDF extraction, OCR, chunking, embeddings, local
-storage, retrieval, and Gemini generation. Generation tests use mocked clients.
+storage, retrieval, Gemini generation, and the Streamlit interface. Generation
+tests use mocked clients, and UI tests use synthetic data and mocked backend calls.
 The regular OCR tests simulate the executable. One optional smoke test uses a
 synthetic PDF and real Tesseract, and skips if the executable is unavailable.
 
 ## Evaluation approach
 
-The manual retrieval check uses the fictional sample PDFs and `eval/questions.csv`
-to measure source hits and evidence coverage. Page hits and reciprocal rank
-require labeled pages. Answer grounding, citation accuracy in generated answers,
-and refusal on insufficient evidence belong to later evaluation.
+The [Task 1 report](docs/TASK_1_FINAL_REPORT.md#evaluation-results) records the latest run.
+See the [validation evidence](docs/TASK_1_VALIDATION_EVIDENCE.md) for the tested environment and commands.
+File hit@1 was **20/20** and page hit@1 was **14/15** labeled questions. All required
+evidence strings were found at depth five for **20/20** answerable questions. These
+are retrieval measurements. The full suite passed **498 tests** with 104 existing
+ChromaDB deprecation warnings.
 
 ### Running the retrieval evaluation
 
@@ -371,6 +477,7 @@ From the repository root in PowerShell with the virtual environment active:
 
 ```powershell
 $env:HF_HUB_OFFLINE = '1'
+$env:TRANSFORMERS_OFFLINE = '1'
 $env:TESSERACT_CMD = 'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 python -B eval/evaluate_retrieval.py
@@ -391,8 +498,22 @@ a temporary ChromaDB index outside the repository. It reports source hits,
 evidence coverage, and per-question similarities, including unsupported and
 order-lookup questions. The parent checks PDF and CSV hashes and cleans up after
 the database-owning child exits. The main index stays untouched. The report
-measures retrieval. End-to-end answer quality and similarity threshold calibration
-remain separate tasks.
+measures retrieval. The original benchmark is unchanged and the
+[proposed label corrections](docs/TASK_1_DATASET_AUDIT.md) are separate.
+
+### Offline generation replay
+
+```powershell
+python -B -m eval.evaluate_generation --records eval/fixtures/generation_mock.jsonl
+```
+
+The evaluator replays synthetic or previously recorded responses with the app's
+validator and reports status agreement, citation checks, skips, and errors. It
+never calls Gemini. For a captured run, supply a local JSONL file and optionally
+`--csv` if it used a different question file. See the
+[replay schema and manual rubric](docs/TASK_1_FINAL_REPORT.md#generation-replay-and-manual-review).
+Keep real recordings private, since they contain source text. Current live UI
+validation is pending a separately authorized run. Follow the [demo guide](docs/TASK_1_DEMO_GUIDE.md#prepare).
 
 ## Security and responsible-AI considerations
 
@@ -411,36 +532,12 @@ human review of customer-facing answers and dependency telemetry and network beh
 
 - PDF extraction, OCR, chunking, embedding, local storage, retrieval, and grounded
   generation are available as Python functions. The caller supplies the passages.
-- No models or system tools were installed or downloaded.
+- Reproduction from a fresh environment remains pending the approved data bundle.
 - Gemini requires an API key and internet access, is subject to rate limits, and
   receives retrieved document text during generation.
-- Python 3.12 setup testing does not verify full dependency compatibility.
-- OCR accuracy, answer quality, hardware performance, and production suitability
-  have not been evaluated.
-
-### Setup validation
-
-Validation on November 20, 2026:
-
-- The two added pins were verified on their PyPI release pages. The eight original
-  pins are unchanged; the requirements file now has ten direct dependencies.
-- `python -m pytest -q` passed with **1 passed, 1 warning in 0.03s** using the available
-  Python 3.12.10 interpreter and pre-existing Pytest 9.1.1. The default `python`
-  command points to an inaccessible Windows alias, so the available interpreter
-  was invoked by its full path. The warning reports denied access when writing
-  the existing Pytest cache; the test itself passed. Testing with pinned Pytest
-  8.3.5 remains outstanding.
-- Full dependency resolution of the updated requirements is **unverified**. No
-  package installation was performed. The earlier setup resolution attempt timed
-  out at `files.pythonhosted.org`; it does not validate these updated requirements.
-- The original setup checked data placeholders and generated-data ignore rules.
-  `.env` remains ignored, with an explicit exception to track `.env.example`.
-  The correction checks passed for absent/present environment settings, the model
-  override, ten dependency pins, the blank example, and the single existing test.
-  Git was initialized by the sandbox account;
-  checks from the host account used a per-command `safe.directory` exception for
-  this repository. No global Git setting was changed. If Git reports dubious
-  ownership, review the repository ownership before trusting it on your account.
+- Exact quotation checks leave claim-level support for human review. Broad live
+  answer quality, OCR accuracy, load performance, and production suitability
+  remain unmeasured.
 
 ## Development roadmap
 
@@ -448,7 +545,7 @@ Validation on November 20, 2026:
 2. PDF extraction and selective OCR (complete).
 3. Chunking, embeddings, and local vector persistence (complete).
 4. Retrieval and Gemini API answers with source citations (Python APIs complete).
-5. Streamlit support workflow.
+5. Streamlit support workflow (local prototype complete).
 6. Evaluation and security/responsible-AI review.
 
 Each later phase requires a separate task and review.

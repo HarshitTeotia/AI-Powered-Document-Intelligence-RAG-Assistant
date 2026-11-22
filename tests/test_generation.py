@@ -338,6 +338,18 @@ def test_exact_quote_must_belong_to_the_cited_chunk(chunk):
         generate_grounded_answer(_QUESTION, [chunk, second], client=_client(_payload(evidence=[_evidence("S2")])))
 
 
+def test_exact_quote_validation_does_not_verify_an_unrelated_claim(chunk):
+    claim = "Unopened products qualify for an automatic Rs. 500.00 refund bonus."
+    client = _client(_payload(answer=claim))
+
+    answer = generate_grounded_answer(_QUESTION, [chunk], client=client)
+
+    assert answer.status == "answered"
+    assert answer.citations[0].quote == _QUOTE
+    assert answer.answer == claim
+    assert "Rs. 500.00" not in chunk.text
+
+
 @pytest.mark.parametrize("separator", ["\r\n", "   ", "\t", "\u00a0"], ids=["line-break", "spaces", "tab", "nbsp"])
 def test_whitespace_equivalent_quote_preserves_original_source_span(chunk, separator):
     original = f"Approved business customers receive Net 15{separator}calendar days from the invoice date."

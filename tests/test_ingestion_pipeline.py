@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from distribuai import config
-from distribuai.ingestion import pipeline
+from distribuai.ingestion import ocr_fallback, pipeline
 from distribuai.ingestion.ocr_fallback import OcrError
 from distribuai.ingestion.pdf_extractor import PdfExtractionError, PdfPage
 from distribuai.rag.chunking import DocumentChunk
@@ -36,9 +36,9 @@ def extraction(monkeypatch: pytest.MonkeyPatch) -> tuple[Mock, Mock, list[PdfPag
                                PdfPage(3, "The native passage remains usable.", False)])
     pages = [PdfPage(1, "The scanned passage is now readable.", False),
              PdfPage(2, " \t", True), PdfPage(3, "The native passage remains usable.", False)]
-    ocr = Mock(return_value=pages)
+    ocr = Mock(side_effect=lambda path, native_pages: (pages, sum(page.needs_ocr for page in native_pages)))
     monkeypatch.setattr(pipeline, "extract_pdf_pages", native)
-    monkeypatch.setattr(pipeline, "extract_pdf_with_ocr", ocr)
+    monkeypatch.setattr(pipeline, "_supplement_pdf_pages", ocr)
     monkeypatch.setattr(pipeline, "embed_chunks", Mock(side_effect=_embeddings))
     return native, ocr, pages
 
@@ -69,7 +69,7 @@ def test_ingests_and_reports_original_pages_and_ocr_attempts(pdf, collection, ex
         1: pages[0].text, 3: pages[2].text,
     }
     native.assert_called_once_with(pdf)
-    ocr.assert_called_once_with(pdf)
+    ocr.assert_called_once_with(pdf, native.return_value)
     assert pages == before_pages and pdf.read_bytes() == before_pdf
     with pytest.raises(FrozenInstanceError):
         setattr(result, "page_count", 10)
@@ -86,6 +86,29 @@ def test_identical_reingestion_and_renamed_sources_stay_independent(pdf, collect
     assert renamed.stale_chunks_removed == 0
     assert _ids(collection, name) == ids and not (ids & _ids(collection, pdf.name))
     assert collection.count() == original.chunk_count + renamed.chunk_count
+
+
+def test_ocr_supplements_the_first_native_pass_and_counts_attempts(pdf, monkeypatch) -> None:
+    pages = [PdfPage(1, "short", True), PdfPage(2, "", True), PdfPage(3, "A readable native page.", False)]
+    native = Mock(return_value=pages)
+    document = Mock()
+    recognize = Mock(side_effect=["Enough recognized text for page one.", ""])
+    monkeypatch.setattr(pipeline, "extract_pdf_pages", native)
+    monkeypatch.setattr(ocr_fallback, "extract_pdf_pages", Mock(side_effect=AssertionError("Duplicate native pass")))
+    monkeypatch.setattr(ocr_fallback, "_resolve_tesseract_cmd", lambda: "tesseract")
+    monkeypatch.setattr(ocr_fallback.pypdfium2, "PdfDocument", Mock(return_value=document))
+    monkeypatch.setattr(ocr_fallback, "_ocr_page", recognize)
+
+    extracted, attempts = pipeline._extract_pages(pdf, pdf.name)
+
+    assert attempts == 2
+    assert extracted == [PdfPage(1, "Enough recognized text for page one.", False), pages[1], pages[2]]
+    assert pages[0] == PdfPage(1, "short", True)
+    native.assert_called_once_with(pdf)
+    assert [call.args for call in recognize.call_args_list] == [
+        (document, 1, "tesseract"), (document, 2, "tesseract"),
+    ]
+    document.close.assert_called_once_with()
 
 
 def test_edited_content_replaces_stale_ids_after_write(pdf, collection, extraction) -> None:
@@ -130,7 +153,7 @@ def test_token_retry_rechunks_whole_document_and_stores_only_the_successful_atte
     assert not {chunk.chunk_id for attempt in attempts[:-1] for chunk in attempt} & _ids(collection, pdf.name)
 
 
-@pytest.mark.parametrize("stage", ["extract_pdf_pages", "extract_pdf_with_ocr", "embed_chunks", "chunk_pdf_pages"])
+@pytest.mark.parametrize("stage", ["extract_pdf_pages", "_supplement_pdf_pages", "embed_chunks", "chunk_pdf_pages"])
 def test_non_token_failure_preserves_old_version_without_retry(
     pdf, collection, extraction, monkeypatch: pytest.MonkeyPatch, stage: str,
 ) -> None:
@@ -138,7 +161,7 @@ def test_non_token_failure_preserves_old_version_without_retry(
     before = collection.get()
     cause = {
         "extract_pdf_pages": PdfExtractionError("synthetic PDF failure"),
-        "extract_pdf_with_ocr": OcrError("synthetic OCR failure"),
+        "_supplement_pdf_pages": OcrError("synthetic OCR failure"),
         "embed_chunks": EmbeddingError("synthetic model failure"),
         "chunk_pdf_pages": ValueError("synthetic chunking failure"),
     }[stage]

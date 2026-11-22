@@ -1,0 +1,24 @@
+[server]
+maxUploadSize = 10
+# Streamlit 1.45.1 probes torch.classes while watching Python modules.
+fileWatcherType = "none"
+
+[client]
+toolbarMode = "viewer"
+
+[theme]
+base = "dark"
+primaryColor = "#49D8C1"
+backgroundColor = "#0C111C"
+secondaryBackgroundColor = "#1C283A"
+textColor = "#F5F8FC"
+borderColor = "#2B3A50"
+linkColor = "#49D8C1"
+font = "sans-serif"
+baseRadius = "0.65rem"
+showWidgetBorder = true
+showSidebarBorder = true
+
+[theme.sidebar]
+backgroundColor = "#151E2D"
+secondaryBackgroundColor = "#1C283A"

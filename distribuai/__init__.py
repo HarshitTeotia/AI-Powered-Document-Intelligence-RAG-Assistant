@@ -1,1 +1,1 @@
-"""DistribuAI: local document intelligence for distribution businesses."""
+"""AI-Powered Document Intelligence & RAG Assistant for distribution businesses."""

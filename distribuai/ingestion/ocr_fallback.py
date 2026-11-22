@@ -34,9 +34,15 @@ def extract_pdf_with_ocr(pdf_path: Path) -> list[PdfPage]:
     Return all pages in order. Native extraction errors propagate unchanged.
     OCR failures raise OcrError without returning partial results.
     """
-    pages = extract_pdf_pages(pdf_path)
-    if not any(page.needs_ocr for page in pages):
-        return pages
+    pages, _ = _supplement_pdf_pages(pdf_path, extract_pdf_pages(pdf_path))
+    return pages
+
+
+def _supplement_pdf_pages(pdf_path: Path, pages: list[PdfPage]) -> tuple[list[PdfPage], int]:
+    """Supplement a single native extraction and count the original OCR flags."""
+    attempts = sum(page.needs_ocr for page in pages)
+    if not attempts:
+        return pages, 0
 
     command = _resolve_tesseract_cmd()
     results = pages.copy()
@@ -54,7 +60,7 @@ def extract_pdf_with_ocr(pdf_path: Path) -> list[PdfPage]:
     except Exception as exc:
         raise OcrError("Could not open or read the PDF for OCR.") from exc
 
-    return results
+    return results, attempts
 
 
 def _resolve_tesseract_cmd() -> str:

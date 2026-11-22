@@ -38,6 +38,7 @@ Thumbs.db
 
 # Logs and temporary output
 *.log
+*.zip
 logs/
 *.tmp
 *.temp
@@ -55,5 +56,3 @@ torch_cache/
 sentence_transformers/
 
 .tmp_pytest/
-
-tmp/

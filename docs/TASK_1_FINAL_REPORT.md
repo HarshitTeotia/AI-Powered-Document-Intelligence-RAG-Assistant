@@ -1,6 +1,6 @@
 # AI-Powered Document Intelligence & RAG Assistant | Task 1 final report
 
-**SMARRTIF AI Consultant Assignment · Option A, GenAI/RAG · 20 November 2026**
+**AI Consultant Assignment · Option A, GenAI/RAG · 20 November 2026**
 
 ## Executive summary
 
